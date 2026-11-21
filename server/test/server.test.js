@@ -174,3 +174,60 @@ test('roles: superadmin appoints admins, admins cannot touch admins', async () =
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test('pulse of friendship: follows, levels, audiences, feed, stories, profiles', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'pulse-social-'));
+  const server = await createServer({ file: join(directory, 'data.json'), adminToken: 'd'.repeat(64) });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const call = async (route, token, data) => {
+    const response = await fetch(base + route, { method: data ? 'POST' : 'GET', headers: { Authorization: `Bearer ${token}`, ...(data && { 'Content-Type': 'application/json' }) }, ...(data && { body: JSON.stringify(data) }) });
+    return { status: response.status, body: await response.json() };
+  };
+  try {
+    const register = async username => (await request(base, '/v1/register', { method: 'POST', data: { username, password: 'password-123' } })).body.token;
+    const ann = await register('ann');
+    const ben = await register('ben');
+    const cat = await register('cat');
+    assert.equal((await call('/v1/follow', ann, { name: 'ben', follow: true })).body.level, 'following');
+    assert.equal((await call('/v1/profile?name=ann', ben)).body.level, 'follower');
+    assert.equal((await call('/v1/follow', ben, { name: 'ann', follow: true })).body.level, 'friend');
+    await call('/v1/follow', cat, { name: 'ann', follow: true });
+
+    await call('/v1/posts', ann, { text: 'для всех', audience: 'all' });
+    await call('/v1/posts', ann, { text: 'для друзей', audience: 'friends' });
+    await call('/v1/posts', ann, { text: 'для близких', audience: 'close' });
+    assert.deepEqual((await call('/v1/feed', ben)).body.posts.map(p => p.text), ['для друзей', 'для всех']);
+    assert.deepEqual((await call('/v1/feed', cat)).body.posts.map(p => p.text), ['для всех']);
+    assert.deepEqual((await call('/v1/posts?name=ann', cat)).body.posts.map(p => p.text), ['для всех']);
+
+    for (let i = 0; i < 6; i++) {
+      await call('/v1/messages', ann, { id: randomUUID(), to: 'ben', text: 'привет ' + i });
+      await call('/v1/messages', ben, { id: randomUUID(), to: 'ann', text: 'и тебе ' + i });
+    }
+    const close = (await call('/v1/profile?name=ben', ann)).body;
+    assert.equal(close.level, 'close');
+    assert.ok(close.pulse >= 60);
+    assert.deepEqual((await call('/v1/feed', ben)).body.posts.map(p => p.text), ['для близких', 'для друзей', 'для всех']);
+
+    assert.equal((await call('/v1/stories', ann, { image: 'aGVsbG8=', audience: 'friends' })).status, 200);
+    assert.deepEqual((await call('/v1/stories', ben)).body.stories.map(s => s.name), ['ann']);
+    assert.deepEqual((await call('/v1/stories', cat)).body.stories, []);
+    assert.equal((await call('/v1/story?name=ann', cat)).status, 404);
+    assert.equal((await call('/v1/story?name=ann', ben)).body.image, 'aGVsbG8=');
+
+    assert.equal((await call('/v1/profile', ann, { displayName: 'Анна', avatar: 'YXZh' })).status, 200);
+    const profile = (await call('/v1/profile?name=ann', cat)).body;
+    assert.equal(profile.displayName, 'Анна');
+    assert.equal(profile.avatar, 'YXZh');
+    assert.equal(profile.followers, 2);
+    assert.equal(profile.friends, 1);
+    const friends = (await call('/v1/friends', ann)).body;
+    assert.deepEqual(friends.people.map(p => [p.name, p.level]), [['ben', 'close'], ['cat', 'follower']]);
+    assert.equal((await call('/v1/people?q=c', ann)).body.people[0].name, 'cat');
+    assert.equal((await call('/v1/follow', ann, { name: 'ann', follow: true })).status, 400);
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+    await rm(directory, { recursive: true, force: true });
+  }
+});

@@ -8,6 +8,8 @@ import android.database.sqlite.SQLiteOpenHelper;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.SecureRandom;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
 import javax.crypto.SecretKeyFactory;
 import javax.crypto.spec.PBEKeySpec;
@@ -21,7 +23,7 @@ final class PhoneServerStore extends SQLiteOpenHelper {
     private final Context context;
 
     PhoneServerStore(Context context) {
-        super(context.getApplicationContext(), "pulse-host.db", null, 4);
+        super(context.getApplicationContext(), "pulse-host.db", null, 5);
         this.context = context.getApplicationContext();
     }
 
@@ -40,6 +42,7 @@ final class PhoneServerStore extends SQLiteOpenHelper {
         db.execSQL("CREATE TABLE reports (id INTEGER PRIMARY KEY AUTOINCREMENT, reporter TEXT NOT NULL, target TEXT NOT NULL, message_id TEXT, message_text TEXT NOT NULL DEFAULT '', reason TEXT NOT NULL, created INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'open', resolved INTEGER)");
         db.execSQL("CREATE TABLE removed (rseq INTEGER PRIMARY KEY AUTOINCREMENT, sender TEXT NOT NULL, id TEXT NOT NULL, recipient TEXT NOT NULL, created INTEGER NOT NULL)");
         createRolesTable(db);
+        createSocialTables(db);
     }
 
     private static void createRolesTable(SQLiteDatabase db) {
@@ -56,6 +59,9 @@ final class PhoneServerStore extends SQLiteOpenHelper {
         }
         if (oldVersion < 4) {
             createRolesTable(db);
+        }
+        if (oldVersion < 5) {
+            createSocialTables(db);
         }
     }
 
@@ -544,5 +550,275 @@ final class PhoneServerStore extends SQLiteOpenHelper {
             db.endTransaction();
         }
         return new JSONObject().put("ok", true);
+    }
+
+    // ---- «Пульс дружбы»: подписки, друзья, близкие, профили, стена, истории ----
+
+    private static final long PULSE_WINDOW = 14L * 24 * 60 * 60 * 1000;
+    private static final long STORY_LIFETIME = 24L * 60 * 60 * 1000;
+
+    private static void createSocialTables(SQLiteDatabase db) {
+        db.execSQL("CREATE TABLE IF NOT EXISTS follows (follower TEXT NOT NULL, target TEXT NOT NULL, created INTEGER NOT NULL, PRIMARY KEY(follower, target))");
+        db.execSQL("CREATE INDEX IF NOT EXISTS follows_target ON follows(target)");
+        db.execSQL("CREATE TABLE IF NOT EXISTS profiles (name TEXT PRIMARY KEY, display_name TEXT NOT NULL DEFAULT '', avatar TEXT NOT NULL DEFAULT '', cover TEXT NOT NULL DEFAULT '')");
+        db.execSQL("CREATE TABLE IF NOT EXISTS posts (id INTEGER PRIMARY KEY AUTOINCREMENT, author TEXT NOT NULL, text TEXT NOT NULL, audience TEXT NOT NULL, created INTEGER NOT NULL)");
+        db.execSQL("CREATE INDEX IF NOT EXISTS posts_author ON posts(author, id)");
+        db.execSQL("CREATE TABLE IF NOT EXISTS stories (author TEXT PRIMARY KEY, image TEXT NOT NULL, audience TEXT NOT NULL, created INTEGER NOT NULL)");
+    }
+
+    private static boolean isAudience(String value) {
+        return value.equals("all") || value.equals("friends") || value.equals("close");
+    }
+
+    private static boolean isBase64(String value) {
+        return value.matches("[A-Za-z0-9+/]*={0,2}");
+    }
+
+    private static boolean follows(SQLiteDatabase db, String a, String b) {
+        try (Cursor c = db.rawQuery("SELECT 1 FROM follows WHERE follower = ? AND target = ?", new String[]{a, b})) {
+            return c.moveToFirst();
+        }
+    }
+
+    /** Пульс пары 0–100: растёт, когда переписка идёт в обе стороны за последние 14 дней. */
+    private static int pulse(SQLiteDatabase db, String a, String b) {
+        String since = Long.toString(System.currentTimeMillis() - PULSE_WINDOW);
+        long ab = count(db, "SELECT COUNT(*) FROM messages WHERE sender = ? AND recipient = ? AND created >= ?", a, b, since);
+        long ba = count(db, "SELECT COUNT(*) FROM messages WHERE sender = ? AND recipient = ? AND created >= ?", b, a, since);
+        return (int) Math.min(100, Math.round(25 * (Math.log(1 + Math.min(ab, ba)) / Math.log(2))));
+    }
+
+    /** Отношение viewer → target: self | none | following | follower | friend | close. */
+    private static JSONObject relation(SQLiteDatabase db, String viewer, String target) throws Exception {
+        if (viewer.equals(target)) {
+            return new JSONObject().put("level", "self").put("pulse", 100).put("following", false).put("followsMe", false);
+        }
+        boolean following = follows(db, viewer, target);
+        boolean followsMe = follows(db, target, viewer);
+        int score = following && followsMe ? pulse(db, viewer, target) : 0;
+        String level = following && followsMe ? (score >= 60 ? "close" : "friend") : following ? "following" : followsMe ? "follower" : "none";
+        return new JSONObject().put("level", level).put("pulse", score).put("following", following).put("followsMe", followsMe);
+    }
+
+    private static boolean canSee(SQLiteDatabase db, String viewer, String author, String audience) throws Exception {
+        if (viewer.equals(author)) {
+            return true;
+        }
+        String level = relation(db, viewer, author).getString("level");
+        if (audience.equals("close")) {
+            return level.equals("close");
+        }
+        if (audience.equals("friends")) {
+            return level.equals("friend") || level.equals("close");
+        }
+        return !level.equals("none") && !level.equals("follower");
+    }
+
+    private static JSONObject person(SQLiteDatabase db, String viewer, String name) throws Exception {
+        JSONObject result = relation(db, viewer, name);
+        result.put("name", name);
+        try (Cursor c = db.rawQuery("SELECT display_name, avatar != '' FROM profiles WHERE name = ?", new String[]{name})) {
+            boolean found = c.moveToFirst();
+            result.put("displayName", found ? c.getString(0) : "").put("hasAvatar", found && c.getInt(1) != 0);
+        }
+        return result;
+    }
+
+    private static void putCounts(SQLiteDatabase db, JSONObject target, String name) throws Exception {
+        target.put("followers", count(db, "SELECT COUNT(*) FROM follows WHERE target = ?", name))
+                .put("following", count(db, "SELECT COUNT(*) FROM follows WHERE follower = ?", name))
+                .put("friends", count(db, "SELECT COUNT(*) FROM follows f WHERE f.target = ? AND EXISTS (SELECT 1 FROM follows g WHERE g.follower = ? AND g.target = f.follower)", name, name));
+    }
+
+    private static void sortByPulse(List<JSONObject> people) {
+        people.sort((a, b) -> {
+            int byPulse = Integer.compare(b.optInt("pulse"), a.optInt("pulse"));
+            return byPulse != 0 ? byPulse : a.optString("name").compareTo(b.optString("name"));
+        });
+    }
+
+    private JSONObject storyRow(SQLiteDatabase db, String author) {
+        try (Cursor c = db.rawQuery("SELECT image, audience, created FROM stories WHERE author = ? AND created > ?", new String[]{author, Long.toString(System.currentTimeMillis() - STORY_LIFETIME)})) {
+            if (!c.moveToFirst()) {
+                return null;
+            }
+            return new JSONObject().put("image", c.getString(0)).put("audience", c.getString(1)).put("time", c.getLong(2));
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** Обрабатывает запросы соцчасти; null — путь не относится к ней. */
+    synchronized JSONObject social(String user, String method, String path, java.util.Map<String, String> params, JSONObject input) throws Exception {
+        SQLiteDatabase db = getWritableDatabase();
+        if (method.equals("GET") && path.equals("/v1/people")) {
+            String query = params.getOrDefault("q", "").trim().toLowerCase(Locale.ROOT);
+            List<JSONObject> people = new ArrayList<>();
+            try (Cursor c = db.rawQuery("SELECT name FROM users WHERE name != ? AND NOT EXISTS (SELECT 1 FROM banned b WHERE b.name = users.name) ORDER BY name LIMIT 500", new String[]{user})) {
+                while (c.moveToNext()) {
+                    if (c.getString(0).contains(query)) {
+                        people.add(person(db, user, c.getString(0)));
+                    }
+                }
+            }
+            sortByPulse(people);
+            return new JSONObject().put("people", new JSONArray(people.subList(0, Math.min(50, people.size()))));
+        }
+        if (method.equals("GET") && path.equals("/v1/friends")) {
+            List<JSONObject> people = new ArrayList<>();
+            try (Cursor c = db.rawQuery("SELECT target FROM follows WHERE follower = ? UNION SELECT follower FROM follows WHERE target = ?", new String[]{user, user})) {
+                while (c.moveToNext()) {
+                    people.add(person(db, user, c.getString(0)));
+                }
+            }
+            sortByPulse(people);
+            JSONObject result = new JSONObject().put("people", new JSONArray(people));
+            putCounts(db, result, user);
+            return result;
+        }
+        if (method.equals("POST") && path.equals("/v1/follow")) {
+            String target = input.optString("name", "").trim().toLowerCase(Locale.ROOT);
+            Object follow = input.opt("follow");
+            if (!userExists(target) || target.equals(user) || !(follow instanceof Boolean)) {
+                throw new Failure(400);
+            }
+            if ((Boolean) follow) {
+                ContentValues values = new ContentValues();
+                values.put("follower", user);
+                values.put("target", target);
+                values.put("created", System.currentTimeMillis());
+                db.insertWithOnConflict("follows", null, values, SQLiteDatabase.CONFLICT_IGNORE);
+            } else {
+                db.delete("follows", "follower = ? AND target = ?", new String[]{user, target});
+            }
+            return person(db, user, target);
+        }
+        if (method.equals("GET") && path.equals("/v1/profile")) {
+            String name = params.getOrDefault("name", user).trim().toLowerCase(Locale.ROOT);
+            if (!userExists(name) || isBanned(db, name)) {
+                throw new Failure(404);
+            }
+            JSONObject result = person(db, user, name);
+            try (Cursor c = db.rawQuery("SELECT avatar, cover FROM profiles WHERE name = ?", new String[]{name})) {
+                boolean found = c.moveToFirst();
+                result.put("avatar", found ? c.getString(0) : "").put("cover", found ? c.getString(1) : "");
+            }
+            putCounts(db, result, name);
+            JSONObject story = storyRow(db, name);
+            result.put("story", story != null && canSee(db, user, name, story.getString("audience")));
+            return result;
+        }
+        if (method.equals("POST") && path.equals("/v1/profile")) {
+            ContentValues values = new ContentValues();
+            if (input.has("displayName")) {
+                String displayName = input.optString("displayName", "").trim();
+                if (displayName.length() > 60) {
+                    throw new Failure(400);
+                }
+                values.put("display_name", displayName);
+            }
+            String[][] images = {{"avatar", "120000"}, {"cover", "400000"}};
+            for (String[] image : images) {
+                if (!input.has(image[0])) {
+                    continue;
+                }
+                Object value = input.opt(image[0]);
+                if (!(value instanceof String) || ((String) value).length() > Integer.parseInt(image[1]) || !isBase64((String) value)) {
+                    throw new Failure(400);
+                }
+                values.put(image[0], (String) value);
+            }
+            ContentValues base = new ContentValues();
+            base.put("name", user);
+            db.insertWithOnConflict("profiles", null, base, SQLiteDatabase.CONFLICT_IGNORE);
+            if (values.size() > 0) {
+                db.update("profiles", values, "name = ?", new String[]{user});
+            }
+            return new JSONObject().put("ok", true);
+        }
+        if (method.equals("POST") && path.equals("/v1/posts")) {
+            String text = input.optString("text", "").trim();
+            String audience = input.optString("audience", "all");
+            if (text.isEmpty() || text.length() > 2000 || !isAudience(audience)) {
+                throw new Failure(400);
+            }
+            ContentValues values = new ContentValues();
+            values.put("author", user);
+            values.put("text", text);
+            values.put("audience", audience);
+            values.put("created", System.currentTimeMillis());
+            long id = db.insertOrThrow("posts", null, values);
+            return new JSONObject().put("id", id).put("author", user).put("text", text).put("audience", audience).put("time", values.getAsLong("created"));
+        }
+        if (method.equals("POST") && path.equals("/v1/posts/delete")) {
+            if (db.delete("posts", "id = ? AND author = ?", new String[]{Long.toString(input.optLong("id", -1)), user}) == 0) {
+                throw new Failure(404);
+            }
+            return new JSONObject().put("ok", true);
+        }
+        if (method.equals("GET") && (path.equals("/v1/posts") || path.equals("/v1/feed"))) {
+            boolean feed = path.equals("/v1/feed");
+            String name = params.getOrDefault("name", user).trim().toLowerCase(Locale.ROOT);
+            String sql = feed
+                    ? "SELECT id, author, text, audience, created FROM posts p WHERE (author = ? OR EXISTS (SELECT 1 FROM follows f WHERE f.follower = ? AND f.target = p.author)) AND NOT EXISTS (SELECT 1 FROM banned b WHERE b.name = p.author) ORDER BY id DESC LIMIT 300"
+                    : "SELECT id, author, text, audience, created FROM posts WHERE author = ? AND ? != '' ORDER BY id DESC LIMIT 300";
+            JSONArray posts = new JSONArray();
+            try (Cursor c = db.rawQuery(sql, new String[]{feed ? user : name, user})) {
+                while (c.moveToNext() && posts.length() < 100) {
+                    if (canSee(db, user, c.getString(1), c.getString(3))) {
+                        posts.put(new JSONObject().put("id", c.getLong(0)).put("author", c.getString(1)).put("text", c.getString(2))
+                                .put("audience", c.getString(3)).put("time", c.getLong(4)).put("level", relation(db, user, c.getString(1)).getString("level")));
+                    }
+                }
+            }
+            return new JSONObject().put("posts", posts);
+        }
+        if (method.equals("POST") && path.equals("/v1/stories")) {
+            Object image = input.opt("image");
+            String audience = input.optString("audience", "all");
+            if (!(image instanceof String) || ((String) image).isEmpty() || ((String) image).length() > 500000 || !isBase64((String) image) || !isAudience(audience)) {
+                throw new Failure(400);
+            }
+            ContentValues values = new ContentValues();
+            values.put("author", user);
+            values.put("image", (String) image);
+            values.put("audience", audience);
+            values.put("created", System.currentTimeMillis());
+            db.insertWithOnConflict("stories", null, values, SQLiteDatabase.CONFLICT_REPLACE);
+            return new JSONObject().put("ok", true);
+        }
+        if (method.equals("POST") && path.equals("/v1/stories/delete")) {
+            db.delete("stories", "author = ?", new String[]{user});
+            return new JSONObject().put("ok", true);
+        }
+        if (method.equals("GET") && path.equals("/v1/stories")) {
+            List<JSONObject> stories = new ArrayList<>();
+            try (Cursor c = db.rawQuery("SELECT author, audience, created FROM stories s WHERE created > ? AND (author = ? OR EXISTS (SELECT 1 FROM follows f WHERE f.follower = ? AND f.target = s.author)) AND NOT EXISTS (SELECT 1 FROM banned b WHERE b.name = s.author)",
+                    new String[]{Long.toString(System.currentTimeMillis() - STORY_LIFETIME), user, user})) {
+                while (c.moveToNext()) {
+                    if (canSee(db, user, c.getString(0), c.getString(1))) {
+                        stories.add(person(db, user, c.getString(0)).put("time", c.getLong(2)).put("audience", c.getString(1)));
+                    }
+                }
+            }
+            stories.sort((a, b) -> {
+                int self = Boolean.compare(b.optString("name").equals(user), a.optString("name").equals(user));
+                if (self != 0) {
+                    return self;
+                }
+                int byPulse = Integer.compare(b.optInt("pulse"), a.optInt("pulse"));
+                return byPulse != 0 ? byPulse : Long.compare(b.optLong("time"), a.optLong("time"));
+            });
+            return new JSONObject().put("stories", new JSONArray(stories));
+        }
+        if (method.equals("GET") && path.equals("/v1/story")) {
+            String name = params.getOrDefault("name", "").trim().toLowerCase(Locale.ROOT);
+            JSONObject story = storyRow(db, name);
+            if (story == null || !canSee(db, user, name, story.getString("audience"))) {
+                throw new Failure(404);
+            }
+            return story.put("name", name);
+        }
+        return null;
     }
 }

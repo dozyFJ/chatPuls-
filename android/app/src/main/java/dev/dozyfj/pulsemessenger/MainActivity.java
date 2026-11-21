@@ -93,6 +93,7 @@ import java.util.function.Supplier;
 import java.util.function.ToIntFunction;
 import java.util.function.ToLongFunction;
 import javax.net.ssl.SSLException;
+import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
@@ -227,7 +228,8 @@ public final class MainActivity extends Activity {
     private static final String[] FEED_SECTIONS = {"Мой профиль", "Чаты", "Каналы", "Сообщества", "Контакты", "Звонки"};
     private static final int[] FEED_SECTION_TABS = {-1, 0, 2, 3, 4, 6};
     private static final int[] FEED_SECTION_ICONS = {R.drawable.ic_feed_profile, R.drawable.ic_pulse_mark, R.drawable.ic_feed_channels, R.drawable.ic_community_rail, R.drawable.ic_feed_profile, R.drawable.ic_audio_call};
-    private static final String[] PROFILE_SECTIONS = {"Лента", "Стена", "Фотоальбом"};
+    private static final String[] PROFILE_SECTIONS = {"Лента", "Стена", "Фотоальбом", "Реки"};
+    private static final int PROFILE_RECS = 3;
     private static final int PROFILE_FEED = 0;
     private static final int PROFILE_WALL = 1;
     private static final int PROFILE_ALBUM = 2;
@@ -452,6 +454,12 @@ public final class MainActivity extends Activity {
 
     @Override
     public void onBackPressed() {
+        if (!this.feedOpen && this.peer == null && (this.openProfile != null || this.friendsOpen)) {
+            this.openProfile = null;
+            this.friendsOpen = false;
+            render();
+            return;
+        }
         if (this.searchMode && !this.feedOpen) {
             closeSearch();
             return;
@@ -1033,6 +1041,11 @@ public final class MainActivity extends Activity {
     }
 
     private void render() {
+        this.socialGeneration++;
+        if (this.page != 6 || this.peer != null) {
+            this.openProfile = null;
+            this.friendsOpen = false;
+        }
         removeStickyProfile();
         if (this.searchMode && (this.peer != null || !isMainPage())) {
             this.searchMode = false;
@@ -1105,7 +1118,13 @@ public final class MainActivity extends Activity {
         } else if (this.page == 5) {
             showClips();
         } else if (this.page == 6) {
-            showFeedPage();
+            if (this.openProfile != null) {
+                renderUserProfile();
+            } else if (this.friendsOpen) {
+                showFriends();
+            } else {
+                showFeedPage();
+            }
         } else if (this.page == 7) {
             showCallHistory();
         } else if (showEmptySection) {
@@ -1319,6 +1338,16 @@ public final class MainActivity extends Activity {
     }
 
     private void swipeMainPage(int direction) {
+        // В профиле свайп листает вкладки Лента → Стена → Фотоальбом → Реки, на краях — разделы.
+        if (this.page == 6 && this.openProfile == null && !this.friendsOpen) {
+            int next = this.feedSection + direction;
+            if (next >= 0 && next < PROFILE_SECTIONS.length) {
+                this.feedSection = next;
+                this.keepProfileTabs = this.scroll.getScrollY() > 0;
+                render();
+                return;
+            }
+        }
         selectAllChatsTab(adjacentChatsTab(direction));
     }
 
@@ -1686,6 +1715,7 @@ public final class MainActivity extends Activity {
         for (int i = 0; i < peers.size() && i < 30; i++) {
             final String name = peers.get(i);
             View bubble = storyBubble(chatAvatar(name), name, false, false);
+            bubble.setTag(name);
             bubble.setContentDescription("Открыть чат " + name);
             bubble.setOnClickListener(v -> {
                 hideFeedDrawer();
@@ -1694,6 +1724,9 @@ public final class MainActivity extends Activity {
                 render();
             });
             row.addView(bubble);
+        }
+        if (onlineAccount()) {
+            loadServerStories(row);
         }
     }
 
@@ -1769,7 +1802,11 @@ public final class MainActivity extends Activity {
         } catch (SecurityException ignored) {
         }
         this.preferences.edit().putString(storyKey() + "uri", uri.toString()).putLong(storyKey() + "time", System.currentTimeMillis()).apply();
-        Toast.makeText(this, "История опубликована на 24 часа", Toast.LENGTH_SHORT).show();
+        if (onlineAccount()) {
+            uploadStory(uri);
+        } else {
+            Toast.makeText(this, "История опубликована на 24 часа", Toast.LENGTH_SHORT).show();
+        }
         if (this.feedOpen && !this.notificationDrawer) {
             renderFeedDrawer();
         }
@@ -1785,7 +1822,13 @@ public final class MainActivity extends Activity {
                 openStory();
             } else {
                 this.preferences.edit().remove(storyKey() + "uri").remove(storyKey() + "time").apply();
-                renderFeedDrawer();
+                serverCall("/v1/stories/delete", new JSONObject(), result -> {
+                }, null);
+                if (this.feedOpen) {
+                    renderFeedDrawer();
+                } else {
+                    render();
+                }
             }
         }).setNegativeButton("Отмена", null).create());
     }
@@ -1962,13 +2005,24 @@ public final class MainActivity extends Activity {
         }
         this.profileTabsAnchor = sections;
         buildStickyProfile();
+        boolean online = onlineAccount();
         if (this.feedSection == PROFILE_WALL) {
-            showWallPosts(true);
+            if (online) {
+                showServerWall();
+            } else {
+                showWallPosts(true);
+            }
         } else if (this.feedSection == PROFILE_ALBUM) {
             showAlbum();
+        } else if (this.feedSection == PROFILE_RECS) {
+            showRecommendations();
         } else {
             showStories(this.content);
-            showWallPosts(false);
+            if (online) {
+                showServerFeed();
+            } else {
+                showWallPosts(false);
+            }
         }
     }
 
@@ -2219,6 +2273,718 @@ public final class MainActivity extends Activity {
         if (found == 0) {
             newCard().addView(text("По запросу «" + query + "» ничего не нашлось.", 14, muted(), false));
         }
+    }
+
+    // ---- «Пульс дружбы» в клиенте: друзья, подписки, чужие профили, серверная лента и истории ----
+
+    private static final String[] AUDIENCES = {"all", "friends", "close"};
+    private static final String[] AUDIENCE_LABELS = {"Все подписчики", "Друзья", "Близкие 💗"};
+    private String openProfile;
+    private boolean friendsOpen;
+    private int socialGeneration;
+    private String wallAudience = "all";
+    private String peopleQuery = "";
+
+    interface JsonCallback {
+        void accept(JSONObject result);
+    }
+
+    /** Запрос к серверу в фоне; ответ приходит на главный поток, только если экран не сменился. */
+    private void serverCall(String path, JSONObject body, JsonCallback onResult, Runnable onError) {
+        if (!onlineAccount()) {
+            if (onError != null) {
+                onError.run();
+            }
+            return;
+        }
+        final String base = this.preferences.getString("server", "");
+        final String token = this.preferences.getString("token", "");
+        final int generation = this.socialGeneration;
+        this.worker.execute(() -> {
+            JSONObject result = null;
+            try {
+                result = new PulseApi(base, token).request(path, body);
+            } catch (Exception ignored) {
+            }
+            final JSONObject finalResult = result;
+            this.handler.post(() -> {
+                if (isDestroyed() || generation != this.socialGeneration) {
+                    return;
+                }
+                if (finalResult != null) {
+                    onResult.accept(finalResult);
+                } else if (onError != null) {
+                    onError.run();
+                }
+            });
+        });
+    }
+
+    private static String levelLabel(String level) {
+        switch (level) {
+            case "close":
+                return "Близкий 💗";
+            case "friend":
+                return "Друг 🤝";
+            case "following":
+                return "Вы подписаны";
+            case "follower":
+                return "Подписан на вас";
+            default:
+                return "";
+        }
+    }
+
+    private Bitmap decodeBase64(String encoded, String cacheKey) {
+        if (encoded == null || encoded.isEmpty()) {
+            return null;
+        }
+        String key = cacheKey + "#" + encoded.length() + ":" + encoded.hashCode();
+        Bitmap cached = this.photoCache.get(key);
+        if (cached != null) {
+            return cached;
+        }
+        try {
+            byte[] data = Base64.decode(encoded, Base64.DEFAULT);
+            Bitmap bitmap = BitmapFactory.decodeByteArray(data, 0, data.length);
+            if (bitmap != null) {
+                this.photoCache.put(key, bitmap);
+            }
+            return bitmap;
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
+    }
+
+    /** Сжимает картинку под лимит сервера: уменьшает сторону и качество, пока не влезет. */
+    private static String encodeForUpload(Bitmap source, int maxSide, int limit) {
+        Bitmap bitmap = source;
+        int side = Math.max(source.getWidth(), source.getHeight());
+        if (side > maxSide) {
+            float scale = maxSide / (float) side;
+            bitmap = Bitmap.createScaledBitmap(source, Math.max(1, Math.round(source.getWidth() * scale)), Math.max(1, Math.round(source.getHeight() * scale)), true);
+        }
+        for (int quality = 85; quality >= 40; quality -= 15) {
+            ByteArrayOutputStream output = new ByteArrayOutputStream();
+            bitmap.compress(Bitmap.CompressFormat.JPEG, quality, output);
+            String encoded = Base64.encodeToString(output.toByteArray(), Base64.NO_WRAP);
+            if (encoded.length() <= limit) {
+                return encoded;
+            }
+        }
+        return null;
+    }
+
+    /** Отправляет на сервер имя, аватар и фон профиля, чтобы их видели другие. */
+    private void syncProfileUp() {
+        if (!onlineAccount()) {
+            return;
+        }
+        final String key = wallProfileKey();
+        final String name = this.preferences.getString(key + "name", "");
+        final Bitmap avatar = loadImage(key, "photo");
+        final Bitmap cover = loadImage(key, "cover");
+        final String base = this.preferences.getString("server", "");
+        final String token = this.preferences.getString("token", "");
+        this.worker.execute(() -> {
+            try {
+                JSONObject body = new JSONObject().put("displayName", name.length() > 60 ? name.substring(0, 60) : name);
+                String avatarData = avatar == null ? "" : encodeForUpload(avatar, 384, 110000);
+                String coverData = cover == null ? "" : encodeForUpload(cover, 960, 380000);
+                if (avatarData != null) {
+                    body.put("avatar", avatarData);
+                }
+                if (coverData != null) {
+                    body.put("cover", coverData);
+                }
+                new PulseApi(base, token).request("/v1/profile", body);
+            } catch (Exception ignored) {
+            }
+        });
+    }
+
+    private void uploadStory(Uri uri) {
+        if (!onlineAccount()) {
+            return;
+        }
+        final String base = this.preferences.getString("server", "");
+        final String token = this.preferences.getString("token", "");
+        final String audience = this.wallAudience;
+        this.worker.execute(() -> {
+            String result = "История видна друзьям и подписчикам";
+            try {
+                BitmapFactory.Options options = new BitmapFactory.Options();
+                options.inJustDecodeBounds = true;
+                try (InputStream input = getContentResolver().openInputStream(uri)) {
+                    BitmapFactory.decodeStream(input, null, options);
+                }
+                options.inJustDecodeBounds = false;
+                options.inSampleSize = 1;
+                while (Math.max(options.outWidth, options.outHeight) / (options.inSampleSize * 2) >= 1080) {
+                    options.inSampleSize *= 2;
+                }
+                Bitmap bitmap;
+                try (InputStream input = getContentResolver().openInputStream(uri)) {
+                    bitmap = BitmapFactory.decodeStream(input, null, options);
+                }
+                String encoded = bitmap == null ? null : encodeForUpload(bitmap, 1080, 480000);
+                if (encoded == null) {
+                    throw new IOException("story too large");
+                }
+                new PulseApi(base, token).request("/v1/stories", new JSONObject().put("image", encoded).put("audience", audience));
+            } catch (Exception e) {
+                result = "Историю не удалось отправить на сервер — она видна только вам";
+            }
+            final String message = result;
+            this.handler.post(() -> {
+                if (!isDestroyed()) {
+                    Toast.makeText(this, message, Toast.LENGTH_SHORT).show();
+                }
+            });
+        });
+    }
+
+    /** Добавляет в ряд историй кружки людей, на которых вы подписаны (с сервера). */
+    private void loadServerStories(LinearLayout row) {
+        serverCall("/v1/stories", null, result -> {
+            JSONArray stories = result.optJSONArray("stories");
+            if (stories == null) {
+                return;
+            }
+            int insertAt = 1;
+            for (int i = 0; i < stories.length(); i++) {
+                JSONObject story = stories.optJSONObject(i);
+                if (story == null || story.optString("name").equals(user())) {
+                    continue;
+                }
+                final String name = story.optString("name");
+                for (int j = row.getChildCount() - 1; j >= 1; j--) {
+                    if (name.equals(row.getChildAt(j).getTag())) {
+                        row.removeViewAt(j);
+                    }
+                }
+                View bubble = storyBubble(chatAvatar(name), story.optString("displayName").isEmpty() ? name : story.optString("displayName"), true, false);
+                bubble.setTag(name);
+                bubble.setContentDescription("История " + name);
+                bubble.setOnClickListener(v -> openServerStory(name));
+                bubble.setOnLongClickListener(v -> {
+                    showUserProfile(name);
+                    return true;
+                });
+                row.addView(bubble, Math.min(insertAt++, row.getChildCount()));
+            }
+        }, null);
+    }
+
+    private void openServerStory(String name) {
+        serverCall("/v1/story?name=" + Uri.encode(name), null, story -> {
+            Bitmap image = decodeBase64(story.optString("image"), "story:" + name);
+            if (image == null) {
+                Toast.makeText(this, "История недоступна", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            showFullscreen(image, "@" + name + " · " + DateUtils.getRelativeTimeSpanString(story.optLong("time"), System.currentTimeMillis(), DateUtils.MINUTE_IN_MILLIS), 5000L);
+        }, () -> Toast.makeText(this, "История уже исчезла", Toast.LENGTH_SHORT).show());
+    }
+
+    private void showFullscreen(Bitmap image, String caption, long duration) {
+        android.app.Dialog viewer = new android.app.Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen);
+        FrameLayout screen = new FrameLayout(this);
+        screen.setBackgroundColor(Color.BLACK);
+        ImageView picture = new ImageView(this);
+        picture.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        picture.setImageBitmap(image);
+        screen.addView(picture, new FrameLayout.LayoutParams(-1, -1));
+        FrameLayout.LayoutParams trackParams = new FrameLayout.LayoutParams(-1, dp(3.0f), Gravity.TOP);
+        trackParams.setMargins(dp(10.0f), dp(14.0f), dp(10.0f), 0);
+        View track = new View(this);
+        track.setBackgroundColor(0x55FFFFFF);
+        screen.addView(track, trackParams);
+        View progress = new View(this);
+        progress.setBackgroundColor(Color.WHITE);
+        progress.setPivotX(0.0f);
+        progress.setScaleX(0.0f);
+        screen.addView(progress, trackParams);
+        TextView title = text(caption, 14, Color.WHITE, true);
+        FrameLayout.LayoutParams titleParams = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.START);
+        titleParams.setMargins(dp(14.0f), dp(26.0f), 0, 0);
+        screen.addView(title, titleParams);
+        screen.setOnClickListener(v -> viewer.dismiss());
+        viewer.setContentView(screen);
+        viewer.show();
+        progress.animate().scaleX(1.0f).setDuration(duration).setInterpolator(new android.view.animation.LinearInterpolator()).withEndAction(() -> {
+            if (viewer.isShowing()) {
+                viewer.dismiss();
+            }
+        }).start();
+    }
+
+    /** Полоска «пульса» пары: от 0 до 100, растёт от взаимной переписки. */
+    private View pulseBar(int pulse) {
+        LinearLayout box = column();
+        TextView label = text("Пульс дружбы · " + pulse, 12, muted(), true);
+        box.addView(label);
+        FrameLayout bar = new FrameLayout(this);
+        bar.setBackground(surface(this.dark ? 0xFF33363A : 0xFFE3E7EB, 4, 0));
+        View fill = new View(this);
+        GradientDrawable gradient = new GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT, new int[]{0xFFFA7E1E, 0xFFD62976, 0xFF962FBF});
+        gradient.setCornerRadius(dp(4.0f));
+        fill.setBackground(gradient);
+        bar.addView(fill, new FrameLayout.LayoutParams(0, -1));
+        bar.post(() -> {
+            FrameLayout.LayoutParams params = (FrameLayout.LayoutParams) fill.getLayoutParams();
+            params.width = Math.round(bar.getWidth() * Math.max(0, Math.min(100, pulse)) / 100f);
+            fill.setLayoutParams(params);
+        });
+        LinearLayout.LayoutParams barParams = new LinearLayout.LayoutParams(-1, dp(8.0f));
+        barParams.topMargin = dp(4.0f);
+        box.addView(bar, barParams);
+        return box;
+    }
+
+    private TextView levelChip(String level) {
+        TextView chip = text(levelLabel(level), 12, level.equals("close") ? 0xFFD62976 : accent(), true);
+        chip.setPadding(dp(8.0f), dp(3.0f), dp(8.0f), dp(3.0f));
+        chip.setBackground(surface(0, 12, level.equals("close") ? 0xFFD62976 : accent()));
+        return chip;
+    }
+
+    private Button followButton(final JSONObject person, final Runnable after) {
+        final String name = person.optString("name");
+        boolean following = person.optBoolean("following");
+        boolean followsMe = person.optBoolean("followsMe");
+        Button button = button(following ? "Отписаться" : followsMe ? "Подписаться в ответ" : "Подписаться", !following);
+        button.setOnClickListener(v -> {
+            button.setEnabled(false);
+            try {
+                serverCall("/v1/follow", new JSONObject().put("name", name).put("follow", !following), result -> {
+                    String level = result.optString("level");
+                    Toast.makeText(this, level.equals("friend") || level.equals("close") ? "Теперь вы друзья 🤝" : !following ? "Вы подписались" : "Вы отписались", Toast.LENGTH_SHORT).show();
+                    after.run();
+                }, () -> {
+                    button.setEnabled(true);
+                    Toast.makeText(this, "Нет связи с сервером", Toast.LENGTH_SHORT).show();
+                });
+            } catch (JSONException ignored) {
+            }
+        });
+        return button;
+    }
+
+    private void personRow(LinearLayout parent, JSONObject person, boolean showFollow, Runnable refresh) {
+        final String name = person.optString("name");
+        LinearLayout row = new LinearLayout(this);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(12.0f), dp(10.0f), dp(12.0f), dp(10.0f));
+        row.setBackground(card());
+        row.setClickable(true);
+        row.setFocusable(true);
+        row.setOnClickListener(v -> showUserProfile(name));
+        LinearLayout.LayoutParams avatarParams = new LinearLayout.LayoutParams(dp(40.0f), dp(40.0f));
+        avatarParams.setMarginEnd(dp(10.0f));
+        row.addView(chatAvatar(name), avatarParams);
+        LinearLayout texts = column();
+        row.addView(texts, new LinearLayout.LayoutParams(0, -2, 1.0f));
+        String display = person.optString("displayName");
+        texts.addView(text(display.isEmpty() ? "@" + name : display, 15, ink(), true));
+        String level = person.optString("level");
+        String details = (display.isEmpty() ? "" : "@" + name + " · ") + (levelLabel(level).isEmpty() ? "не знакомы" : levelLabel(level))
+                + (person.optInt("pulse") > 0 ? " · пульс " + person.optInt("pulse") : "");
+        texts.addView(text(details, 12, level.equals("close") ? 0xFFD62976 : muted(), false));
+        if (showFollow && !person.optBoolean("following")) {
+            Button follow = followButton(person, refresh);
+            follow.setTextSize(13);
+            row.addView(follow, new LinearLayout.LayoutParams(-2, dp(40.0f)));
+        }
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, -2);
+        params.bottomMargin = dp(8.0f);
+        parent.addView(row, params);
+    }
+
+    // ---- Экран «Друзья и подписки» ----
+
+    private void openFriends() {
+        this.friendsOpen = true;
+        this.openProfile = null;
+        if (this.page != 6) {
+            selectAllChatsTab(5);
+        } else {
+            render();
+        }
+    }
+
+    private void showFriends() {
+        this.content.removeAllViews();
+        LinearLayout head = new LinearLayout(this);
+        head.setGravity(Gravity.CENTER_VERTICAL);
+        TextView back = text("‹  Профиль", 15, accent(), true);
+        back.setPadding(dp(4.0f), dp(8.0f), dp(8.0f), dp(8.0f));
+        back.setOnClickListener(v -> {
+            this.friendsOpen = false;
+            render();
+        });
+        head.addView(back);
+        this.content.addView(head);
+        final EditText search = field("Найти людей по chatId", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
+        search.setText(this.peopleQuery);
+        search.setBackground(surface(this.dark ? 0xFF2A2C2F : 0xFFF7F8FA, 16, surfaceOutline()));
+        search.setPadding(dp(14.0f), dp(10.0f), dp(14.0f), dp(10.0f));
+        LinearLayout.LayoutParams searchParams = new LinearLayout.LayoutParams(-1, -2);
+        searchParams.bottomMargin = dp(10.0f);
+        this.content.addView(search, searchParams);
+        final LinearLayout list = column();
+        this.content.addView(list, new LinearLayout.LayoutParams(-1, -2));
+        final Runnable[] reload = new Runnable[1];
+        reload[0] = () -> {
+            String query = this.peopleQuery;
+            list.removeAllViews();
+            list.addView(text("Загрузка…", 14, muted(), false));
+            if (query.isEmpty()) {
+                serverCall("/v1/friends", null, result -> {
+                    list.removeAllViews();
+                    TextView stats = text("Друзья " + result.optInt("friends") + "  ·  Подписчики " + result.optInt("followers") + "  ·  Подписки " + result.optInt("following"), 13, muted(), true);
+                    stats.setPadding(dp(4.0f), 0, 0, dp(8.0f));
+                    list.addView(stats);
+                    JSONArray people = result.optJSONArray("people");
+                    if (people == null || people.length() == 0) {
+                        newCard(list).addView(text("Пока никого. Найдите людей по chatId выше или загляните в «Реки».", 14, muted(), false));
+                        return;
+                    }
+                    for (int i = 0; i < people.length(); i++) {
+                        personRow(list, people.optJSONObject(i), true, reload[0]);
+                    }
+                }, () -> {
+                    list.removeAllViews();
+                    newCard(list).addView(text("Нет связи с сервером", 14, muted(), false));
+                });
+            } else {
+                serverCall("/v1/people?q=" + Uri.encode(query), null, result -> {
+                    list.removeAllViews();
+                    JSONArray people = result.optJSONArray("people");
+                    if (people == null || people.length() == 0) {
+                        newCard(list).addView(text("Никого не нашли", 14, muted(), false));
+                        return;
+                    }
+                    for (int i = 0; i < people.length(); i++) {
+                        personRow(list, people.optJSONObject(i), true, reload[0]);
+                    }
+                }, null);
+            }
+        };
+        search.addTextChangedListener(new TextWatcher() {
+            @Override
+            public void beforeTextChanged(CharSequence s, int start, int count, int after) {
+            }
+
+            @Override
+            public void onTextChanged(CharSequence s, int start, int before, int count) {
+            }
+
+            @Override
+            public void afterTextChanged(Editable editable) {
+                MainActivity.this.peopleQuery = editable.toString().trim().toLowerCase(Locale.ROOT);
+                MainActivity.this.handler.removeCallbacks(reload[0]);
+                MainActivity.this.handler.postDelayed(reload[0], 300L);
+            }
+        });
+        reload[0].run();
+    }
+
+    // ---- Чужой профиль ----
+
+    private void showUserProfile(String name) {
+        if (name.equals(user())) {
+            this.openProfile = null;
+            this.friendsOpen = false;
+            if (this.page != 6) {
+                selectAllChatsTab(5);
+            } else {
+                render();
+            }
+            return;
+        }
+        if (!onlineAccount()) {
+            Toast.makeText(this, "Профили видны, когда вы вошли на сервер", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        this.openProfile = name;
+        this.friendsOpen = false;
+        if (this.feedOpen) {
+            hideFeedDrawer();
+        }
+        this.peer = null;
+        if (this.page != 6) {
+            selectAllChatsTab(5);
+        } else {
+            render();
+        }
+    }
+
+    private void renderUserProfile() {
+        final String name = this.openProfile;
+        this.content.removeAllViews();
+        TextView back = text("‹  Назад", 15, accent(), true);
+        back.setPadding(dp(4.0f), dp(8.0f), dp(8.0f), dp(8.0f));
+        back.setOnClickListener(v -> onBackPressed());
+        this.content.addView(back);
+        final LinearLayout holder = column();
+        this.content.addView(holder, new LinearLayout.LayoutParams(-1, -2));
+        newCard(holder).addView(text("Загрузка профиля @" + name + "…", 14, muted(), false));
+        serverCall("/v1/profile?name=" + Uri.encode(name), null, profile -> {
+            holder.removeAllViews();
+            LinearLayout card = column();
+            card.setBackground(surface(this.dark ? 0xFF222426 : 0xFFF7F8FA, 22, surfaceOutline()));
+            card.setClipToOutline(true);
+            LinearLayout.LayoutParams cardParams = new LinearLayout.LayoutParams(-1, -2);
+            cardParams.bottomMargin = dp(12.0f);
+            holder.addView(card, cardParams);
+            FrameLayout cover = new FrameLayout(this);
+            Bitmap coverImage = decodeBase64(profile.optString("cover"), "cover:" + name);
+            if (coverImage != null) {
+                ImageView picture = new ImageView(this);
+                picture.setScaleType(ImageView.ScaleType.CENTER_CROP);
+                picture.setImageBitmap(coverImage);
+                cover.addView(picture, new FrameLayout.LayoutParams(-1, -1));
+            } else {
+                cover.setBackground(new GradientDrawable(GradientDrawable.Orientation.TL_BR, this.dark
+                        ? new int[]{0xFF2F3A55, 0xFF3A1F4A, 0xFF2A2C2F} : new int[]{0xFFFFE0D2, 0xFFE9DDF7, 0xFFD6E4FF}));
+            }
+            card.addView(cover, new LinearLayout.LayoutParams(-1, dp(130.0f)));
+            LinearLayout details = new LinearLayout(this);
+            details.setGravity(Gravity.BOTTOM);
+            details.setPadding(dp(16.0f), 0, dp(12.0f), 0);
+            LinearLayout.LayoutParams detailsParams = new LinearLayout.LayoutParams(-1, -2);
+            detailsParams.topMargin = -dp(40.0f);
+            card.addView(details, detailsParams);
+            FrameLayout avatar = new FrameLayout(this);
+            boolean story = profile.optBoolean("story");
+            GradientDrawable ring = new GradientDrawable();
+            ring.setShape(GradientDrawable.OVAL);
+            if (story) {
+                ring.setGradientType(GradientDrawable.SWEEP_GRADIENT);
+                ring.setColors(STORY_RING);
+            } else {
+                ring.setColor(this.dark ? 0xFF222426 : 0xFFF7F8FA);
+            }
+            avatar.setBackground(ring);
+            avatar.setPadding(dp(3.0f), dp(3.0f), dp(3.0f), dp(3.0f));
+            FrameLayout photo = outlinedAvatar();
+            photo.setClipToOutline(true);
+            Bitmap avatarImage = decodeBase64(profile.optString("avatar"), "avatar:" + name);
+            if (avatarImage != null) {
+                ImageView picture = new ImageView(this);
+                picture.setScaleType(ImageView.ScaleType.CENTER_CROP);
+                picture.setImageBitmap(avatarImage);
+                photo.addView(picture, new FrameLayout.LayoutParams(-1, -1));
+            } else {
+                TextView initial = text(name.substring(0, 1).toUpperCase(Locale.ROOT), 30, ink(), true);
+                initial.setGravity(Gravity.CENTER);
+                photo.addView(initial, new FrameLayout.LayoutParams(-1, -1));
+            }
+            avatar.addView(photo, new FrameLayout.LayoutParams(-1, -1));
+            if (story) {
+                avatar.setOnClickListener(v -> openServerStory(name));
+            }
+            details.addView(avatar, new LinearLayout.LayoutParams(dp(86.0f), dp(86.0f)));
+            details.addView(new View(this), new LinearLayout.LayoutParams(0, 1, 1.0f));
+            String level = profile.optString("level");
+            if (!levelLabel(level).isEmpty()) {
+                details.addView(levelChip(level));
+            }
+            LinearLayout info = column();
+            info.setPadding(dp(16.0f), dp(10.0f), dp(16.0f), dp(16.0f));
+            card.addView(info, new LinearLayout.LayoutParams(-1, -2));
+            String display = profile.optString("displayName");
+            info.addView(text(display.isEmpty() ? "@" + name : display, 20, ink(), true));
+            if (!display.isEmpty()) {
+                info.addView(text("@" + name, 13, muted(), false));
+            }
+            TextView stats = text("Друзья " + profile.optInt("friends") + "  ·  Подписчики " + profile.optInt("followers") + "  ·  Подписки " + profile.optInt("following"), 13, muted(), true);
+            stats.setPadding(0, dp(8.0f), 0, dp(8.0f));
+            info.addView(stats);
+            if (level.equals("friend") || level.equals("close")) {
+                View pulse = pulseBar(profile.optInt("pulse"));
+                LinearLayout.LayoutParams pulseParams = new LinearLayout.LayoutParams(-1, -2);
+                pulseParams.bottomMargin = dp(10.0f);
+                info.addView(pulse, pulseParams);
+            }
+            LinearLayout actions = new LinearLayout(this);
+            info.addView(actions, new LinearLayout.LayoutParams(-1, -2));
+            Button follow = followButton(profile, this::render);
+            actions.addView(follow, new LinearLayout.LayoutParams(0, -2, 1.0f));
+            Button write = button("Написать", false);
+            LinearLayout.LayoutParams writeParams = new LinearLayout.LayoutParams(0, -2, 1.0f);
+            writeParams.setMarginStart(dp(8.0f));
+            actions.addView(write, writeParams);
+            write.setOnClickListener(v -> {
+                this.openProfile = null;
+                this.store.createChat(owner(), name);
+                this.peer = name;
+                this.page = 0;
+                render();
+            });
+            serverCall("/v1/posts?name=" + Uri.encode(name), null, result -> showPosts(holder, result.optJSONArray("posts"),
+                    "Записей, которые вам видны, пока нет. Друзьям и близким видно больше."), null);
+        }, () -> {
+            holder.removeAllViews();
+            newCard(holder).addView(text("Профиль недоступен", 14, muted(), false));
+        });
+    }
+
+    private void showPosts(LinearLayout parent, JSONArray posts, String empty) {
+        if (posts == null || posts.length() == 0) {
+            newCard(parent).addView(text(empty, 14, muted(), false));
+            return;
+        }
+        for (int i = 0; i < posts.length(); i++) {
+            JSONObject post = posts.optJSONObject(i);
+            if (post == null) {
+                continue;
+            }
+            final String author = post.optString("author");
+            final long id = post.optLong("id");
+            boolean mine = author.equals(user());
+            LinearLayout card = newCard(parent);
+            LinearLayout head = new LinearLayout(this);
+            head.setGravity(Gravity.CENTER_VERTICAL);
+            View avatar = mine ? outlinedAvatar() : chatAvatar(author);
+            if (mine) {
+                showProfilePhoto((FrameLayout) avatar, wallProfileKey(), "♙", 14, ink());
+            }
+            avatar.setOnClickListener(v -> showUserProfile(author));
+            LinearLayout.LayoutParams avatarParams = new LinearLayout.LayoutParams(dp(34.0f), dp(34.0f));
+            avatarParams.setMarginEnd(dp(10.0f));
+            head.addView(avatar, avatarParams);
+            LinearLayout who = column();
+            who.addView(text(mine ? "Вы" : "@" + author, 14, ink(), true));
+            String audience = post.optString("audience");
+            String meta = DateUtils.getRelativeTimeSpanString(post.optLong("time"), System.currentTimeMillis(), DateUtils.MINUTE_IN_MILLIS)
+                    + (audience.equals("close") ? " · 💗 близким" : audience.equals("friends") ? " · 🤝 друзьям" : "");
+            who.addView(text(meta, 12, muted(), false));
+            head.addView(who, new LinearLayout.LayoutParams(0, -2, 1.0f));
+            card.addView(head);
+            TextView body = text(post.optString("text"), 15, ink(), false);
+            body.setPadding(0, dp(10.0f), 0, 0);
+            card.addView(body);
+            if (mine) {
+                card.setOnLongClickListener(v -> {
+                    showDialog(new AlertDialog.Builder(this).setTitle("Удалить запись?").setNegativeButton("Отмена", null)
+                            .setPositiveButton("Удалить", (dialog, which) -> {
+                                try {
+                                    serverCall("/v1/posts/delete", new JSONObject().put("id", id), result -> render(), null);
+                                } catch (JSONException ignored) {
+                                }
+                            }).create());
+                    return true;
+                });
+            }
+        }
+    }
+
+    /** Стена на сервере: поле записи с выбором, кому видно, и свои записи. */
+    private void showServerWall() {
+        LinearLayout card = newCard();
+        final EditText input = field("Что у вас нового?", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
+        input.setSingleLine(false);
+        input.setMaxLines(6);
+        input.setFilters(new InputFilter[]{new InputFilter.LengthFilter(2000)});
+        card.addView(input, new LinearLayout.LayoutParams(-1, -2));
+        LinearLayout row = new LinearLayout(this);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(-1, -2);
+        rowParams.topMargin = dp(8.0f);
+        card.addView(row, rowParams);
+        int selected = Math.max(0, java.util.Arrays.asList(AUDIENCES).indexOf(this.wallAudience));
+        final TextView audience = text("Видно: " + AUDIENCE_LABELS[selected] + " ▾", 13, accent(), true);
+        audience.setPadding(dp(4.0f), dp(8.0f), dp(8.0f), dp(8.0f));
+        audience.setOnClickListener(v -> showDialog(new AlertDialog.Builder(this).setTitle("Кому видна запись").setItems(AUDIENCE_LABELS, (dialog, which) -> {
+            this.wallAudience = AUDIENCES[which];
+            audience.setText("Видно: " + AUDIENCE_LABELS[which] + " ▾");
+        }).create()));
+        row.addView(audience, new LinearLayout.LayoutParams(0, -2, 1.0f));
+        Button publish = button("Опубликовать", true);
+        row.addView(publish, new LinearLayout.LayoutParams(-2, dp(42.0f)));
+        publish.setOnClickListener(v -> {
+            String value = input.getText().toString().trim();
+            if (value.isEmpty()) {
+                return;
+            }
+            publish.setEnabled(false);
+            try {
+                serverCall("/v1/posts", new JSONObject().put("text", value).put("audience", this.wallAudience), result -> render(), () -> {
+                    publish.setEnabled(true);
+                    Toast.makeText(this, "Нет связи с сервером", Toast.LENGTH_SHORT).show();
+                });
+            } catch (JSONException ignored) {
+            }
+        });
+        final LinearLayout list = column();
+        this.content.addView(list, new LinearLayout.LayoutParams(-1, -2));
+        serverCall("/v1/posts", null, result -> showPosts(list, result.optJSONArray("posts"), "Записей на стене пока нет. Напишите первую."), () ->
+                newCard(list).addView(text("Нет связи с сервером", 14, muted(), false)));
+    }
+
+    private void showServerFeed() {
+        final LinearLayout list = column();
+        this.content.addView(list, new LinearLayout.LayoutParams(-1, -2));
+        newCard(list).addView(text("Загрузка ленты…", 14, muted(), false));
+        serverCall("/v1/feed", null, result -> {
+            list.removeAllViews();
+            showPosts(list, result.optJSONArray("posts"), "В ленте пока пусто. Подпишитесь на людей во вкладке «Реки» — их записи появятся здесь.");
+        }, () -> {
+            list.removeAllViews();
+            newCard(list).addView(text("Нет связи с сервером", 14, muted(), false));
+        });
+    }
+
+    /** «Реки»: рекомендации людей — сначала те, кто на вас подписан, и с кем уже есть пульс. */
+    private void showRecommendations() {
+        final LinearLayout list = column();
+        this.content.addView(list, new LinearLayout.LayoutParams(-1, -2));
+        if (!onlineAccount()) {
+            newCard(list).addView(text("Рекомендации появятся, когда вы войдёте на сервер.", 14, muted(), false));
+            return;
+        }
+        newCard(list).addView(text("Подбираем людей…", 14, muted(), false));
+        serverCall("/v1/people", null, result -> {
+            list.removeAllViews();
+            JSONArray people = result.optJSONArray("people");
+            List<JSONObject> picks = new ArrayList<>();
+            for (int i = 0; people != null && i < people.length(); i++) {
+                JSONObject person = people.optJSONObject(i);
+                if (person != null && !person.optBoolean("following")) {
+                    picks.add(person);
+                }
+            }
+            picks.sort((a, b) -> Boolean.compare(b.optBoolean("followsMe"), a.optBoolean("followsMe")));
+            if (picks.isEmpty()) {
+                newCard(list).addView(text("Вы уже подписаны на всех на этом сервере 🎉", 14, muted(), false));
+                return;
+            }
+            TextView title = text("Возможно, вы знакомы", 13, muted(), true);
+            title.setPadding(dp(4.0f), 0, 0, dp(8.0f));
+            list.addView(title);
+            for (JSONObject person : picks) {
+                personRow(list, person, true, this::render);
+            }
+        }, () -> {
+            list.removeAllViews();
+            newCard(list).addView(text("Нет связи с сервером", 14, muted(), false));
+        });
+    }
+
+    /** Счётчики друзей в шапке своего профиля. */
+    private void addSocialCounters(LinearLayout fields) {
+        if (!onlineAccount()) {
+            return;
+        }
+        final TextView counters = text("Друзья …  ·  Подписчики …  ·  Подписки …", 13, accent(), true);
+        counters.setPadding(0, dp(6.0f), 0, dp(4.0f));
+        counters.setFocusable(true);
+        counters.setOnClickListener(v -> openFriends());
+        fields.addView(counters);
+        serverCall("/v1/friends", null, result -> counters.setText("Друзья " + result.optInt("friends") + "  ·  Подписчики "
+                + result.optInt("followers") + "  ·  Подписки " + result.optInt("following") + "  ›"), null);
     }
 
     // ---- Закреплённая панель профиля: при прокрутке вниз шапка уходит, а вкладки остаются сверху ----
@@ -2609,6 +3375,7 @@ public final class MainActivity extends Activity {
             changeCover.setOnLongClickListener(v -> {
                 this.preferences.edit().remove(key + "cover").apply();
                 refreshWall();
+                syncProfileUp();
                 return true;
             });
         }
@@ -2655,6 +3422,7 @@ public final class MainActivity extends Activity {
         }
         addProfileField(fields, "chatId", onlineAccount() ? "@" + user() : "");
         addProfileField(fields, "Почта", this.preferences.getString(key + "email", ""));
+        addSocialCounters(fields);
         return card;
     }
 
@@ -2739,6 +3507,7 @@ public final class MainActivity extends Activity {
             this.preferences.edit().putString(key + "name", name.getText().toString().trim()).putString(key + "email", address).putString(key + "phone", phone.getText().toString().trim()).apply();
             dialog.dismiss();
             refreshWall();
+            syncProfileUp();
 
         }));
         showDialog(dialog);
@@ -2800,6 +3569,7 @@ public final class MainActivity extends Activity {
                     }
                     if (key.equals(wallProfileKey())) {
                         refreshWall();
+                        syncProfileUp();
                     } else if (this.page == 0 || this.page == 1) {
                         refreshChats();
                     }
@@ -3194,13 +3964,14 @@ public final class MainActivity extends Activity {
         final String currentOwner = owner();
         final boolean archived = this.store.isArchived(currentOwner, name);
         final boolean blocked = this.store.isBlocked(currentOwner, name);
-        String[] actions = new String[onlineAccount() ? 5 : 4];
+        String[] actions = new String[onlineAccount() ? 6 : 4];
         actions[0] = archived ? "Вернуть из архива" : "В архив";
         actions[1] = "Выбрать фото аватара";
         actions[2] = "Удалить";
         actions[3] = blocked ? "Разблокировать" : "Заблокировать";
         if (actions.length > 4) {
             actions[4] = "Пожаловаться";
+            actions[5] = "Профиль и пульс дружбы";
         }
         showDialog(new AlertDialog.Builder(this).setTitle(name).setItems(actions, (dialog, which) -> {
             switch (which) {
@@ -3221,6 +3992,9 @@ public final class MainActivity extends Activity {
                     break;
                 case 4:
                     reportAbuse(name, null);
+                    break;
+                case 5:
+                    showUserProfile(name);
                     break;
             }
 

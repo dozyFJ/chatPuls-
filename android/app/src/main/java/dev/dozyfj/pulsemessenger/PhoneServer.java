@@ -151,7 +151,8 @@ final class PhoneServer implements AutoCloseable {
                 }
                 String path = uri.getPath();
                 boolean voice = request[0].equals("POST") && path.equals("/v1/voice");
-                if (length > (voice ? 100000 : 16384)) {
+                boolean largeBody = request[0].equals("POST") && (path.equals("/v1/profile") || path.equals("/v1/stories"));
+                if (length > (largeBody ? 600000 : voice ? 100000 : 16384)) {
                     throw new PhoneServerStore.Failure(413);
                 }
                 boolean auth = request[0].equals("POST") && (path.equals("/v1/register") || path.equals("/v1/login"));
@@ -205,6 +206,8 @@ final class PhoneServer implements AutoCloseable {
                     result = this.calls.change(user, payload, this.store);
                 } else if (request[0].equals("POST") && (path.equals("/v1/messages") || voice)) {
                     result = this.store.send(user, payload, voice);
+                } else if ((result = this.store.social(user, request[0], path, queryParams(query), payload)) != null) {
+                    // соцчасть: подписки, профили, стена, истории
                 } else if (request[0].equals("POST") && path.equals("/v1/reports")) {
                     result = this.store.report(user, payload);
                 } else if (request[0].equals("GET") && path.equals("/v1/messages")) {
@@ -230,7 +233,7 @@ final class PhoneServer implements AutoCloseable {
         }
     }
 
-    private JSONObject adminRequest(PhoneServerStore.Actor actor, String method, String path, String query, JSONObject payload) throws Exception {
+    private static Map<String, String> queryParams(String query) throws Exception {
         Map<String, String> params = new HashMap<>();
         if (query != null) {
             for (String pair : query.split("&")) {
@@ -240,6 +243,11 @@ final class PhoneServer implements AutoCloseable {
                 }
             }
         }
+        return params;
+    }
+
+    private JSONObject adminRequest(PhoneServerStore.Actor actor, String method, String path, String query, JSONObject payload) throws Exception {
+        Map<String, String> params = queryParams(query);
         if (method.equals("GET") && path.equals("/v1/admin/me")) {
             return this.store.adminMe(actor);
         }

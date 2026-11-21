@@ -34,6 +34,11 @@ export async function createServer({ file, adminToken }) {
   state.removed ??= [];
   state.nextRemoval ??= 1;
   state.roles ??= {};
+  state.follows ??= {};
+  state.profiles ??= {};
+  state.posts ??= [];
+  state.nextPost ??= 1;
+  state.stories ??= {};
   let createdAdminToken = null;
   if (adminToken !== undefined) {
     if (!adminPattern.test(adminToken)) throw new Error('admin token must be 64 hex characters');
@@ -75,12 +80,12 @@ export async function createServer({ file, adminToken }) {
     res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
     res.end(JSON.stringify(body));
   }
-  async function body(req) {
+  async function body(req, limit = 16_384) {
     let size = 0;
     const chunks = [];
     for await (const chunk of req) {
       size += chunk.length;
-      if (size > 16_384) throw new Error('body too large');
+      if (size > limit) throw new Error('body too large');
       chunks.push(chunk);
     }
     return JSON.parse(Buffer.concat(chunks).toString('utf8'));
@@ -98,11 +103,179 @@ export async function createServer({ file, adminToken }) {
     const actual = Buffer.from(hash(value), 'hex');
     return expected.length === actual.length && timingSafeEqual(expected, actual);
   }
-  async function json(req, res) {
+  async function json(req, res, limit) {
     let input;
-    try { input = await body(req); } catch { reply(res, 400, { error: 'invalid request' }); return null; }
+    try { input = await body(req, limit); } catch { reply(res, 400, { error: 'invalid request' }); return null; }
     if (!input || typeof input !== 'object' || Array.isArray(input)) { reply(res, 400, { error: 'invalid request' }); return null; }
     return input;
+  }
+  // ---- «Пульс дружбы»: подписки, друзья, близкие, профили, стена, истории ----
+  const audiences = ['all', 'friends', 'close'];
+  const base64Pattern = /^[A-Za-z0-9+/]*={0,2}$/;
+  const pulseWindow = 14 * day;
+  const storyLifetime = day;
+  const follows = (a, b) => Boolean(state.follows[a]?.[b]);
+  /** Пульс пары 0–100: растёт, когда переписка идёт в обе стороны за последние 14 дней. */
+  function pulse(a, b) {
+    const since = Date.now() - pulseWindow;
+    let ab = 0, ba = 0;
+    for (const m of state.messages) {
+      if (m.time < since) continue;
+      if (m.from === a && m.to === b) ab++;
+      else if (m.from === b && m.to === a) ba++;
+    }
+    return Math.min(100, Math.round(25 * Math.log2(1 + Math.min(ab, ba))));
+  }
+  /** Отношение viewer → target: none | following | follower | friend | close. */
+  function relation(viewer, target) {
+    if (viewer === target) return { level: 'self', pulse: 100, following: false, followsMe: false };
+    const following = follows(viewer, target);
+    const followsMe = follows(target, viewer);
+    const score = following && followsMe ? pulse(viewer, target) : 0;
+    const level = following && followsMe ? (score >= 60 ? 'close' : 'friend') : following ? 'following' : followsMe ? 'follower' : 'none';
+    return { level, pulse: score, following, followsMe };
+  }
+  function canSee(viewer, author, audience) {
+    if (viewer === author) return true;
+    const level = relation(viewer, author).level;
+    if (audience === 'close') return level === 'close';
+    if (audience === 'friends') return level === 'friend' || level === 'close';
+    return level !== 'none' && level !== 'follower';
+  }
+  function person(viewer, name) {
+    const profile = state.profiles[name] || {};
+    return { name, displayName: profile.displayName || '', hasAvatar: Boolean(profile.avatar), ...relation(viewer, name) };
+  }
+  function counts(name) {
+    let followers = 0, following = 0, friends = 0;
+    for (const [a, targets] of Object.entries(state.follows)) {
+      for (const b of Object.keys(targets)) {
+        if (b === name) { followers++; if (follows(name, a)) friends++; }
+        if (a === name) following++;
+      }
+    }
+    return { followers, following, friends };
+  }
+  const liveStory = name => {
+    const story = state.stories[name];
+    return story && Date.now() - story.time < storyLifetime ? story : null;
+  };
+  async function social(req, res, url, user) {
+    const method = req.method;
+    const path = url.pathname;
+    if (method === 'GET' && path === '/v1/people') {
+      const query = normalized(url.searchParams.get('q') || '');
+      const people = Object.keys(state.users).filter(n => n !== user && n.includes(query) && !Object.hasOwn(state.banned, n))
+        .map(n => person(user, n)).sort((a, b) => b.pulse - a.pulse || a.name.localeCompare(b.name)).slice(0, 50);
+      return reply(res, 200, { people });
+    }
+    if (method === 'GET' && path === '/v1/friends') {
+      const all = new Set([...Object.keys(state.follows[user] || {})]);
+      for (const [a, targets] of Object.entries(state.follows)) if (targets[user]) all.add(a);
+      const people = [...all].filter(n => Object.hasOwn(state.users, n)).map(n => person(user, n))
+        .sort((a, b) => b.pulse - a.pulse || a.name.localeCompare(b.name));
+      return reply(res, 200, { people, ...counts(user) });
+    }
+    if (method === 'POST' && path === '/v1/follow') {
+      const input = await json(req, res);
+      if (!input) return;
+      const target = normalized(input.name);
+      if (!Object.hasOwn(state.users, target) || target === user || typeof input.follow !== 'boolean') return reply(res, 400, { error: 'invalid request' });
+      await change(next => {
+        next.follows[user] ??= {};
+        if (input.follow) next.follows[user][target] = Date.now();
+        else delete next.follows[user][target];
+      });
+      return reply(res, 200, person(user, target));
+    }
+    if (method === 'GET' && path === '/v1/profile') {
+      const name = normalized(url.searchParams.get('name') || user);
+      if (!Object.hasOwn(state.users, name) || Object.hasOwn(state.banned, name)) return reply(res, 404, { error: 'not found' });
+      const profile = state.profiles[name] || {};
+      const story = liveStory(name);
+      return reply(res, 200, {
+        ...person(user, name), avatar: profile.avatar || '', cover: profile.cover || '', ...counts(name),
+        story: Boolean(story && canSee(user, name, story.audience)),
+      });
+    }
+    if (method === 'POST' && path === '/v1/profile') {
+      const input = await json(req, res, 600_000);
+      if (!input) return;
+      const update = {};
+      if (input.displayName !== undefined) {
+        if (typeof input.displayName !== 'string' || input.displayName.trim().length > 60) return reply(res, 400, { error: 'invalid name' });
+        update.displayName = input.displayName.trim();
+      }
+      for (const [field, limit] of [['avatar', 120_000], ['cover', 400_000]]) {
+        if (input[field] === undefined) continue;
+        if (typeof input[field] !== 'string' || input[field].length > limit || !base64Pattern.test(input[field])) return reply(res, 400, { error: 'invalid image' });
+        update[field] = input[field];
+      }
+      await change(next => { next.profiles[user] = { ...(next.profiles[user] || {}), ...update }; });
+      return reply(res, 200, { ok: true });
+    }
+    if (method === 'POST' && path === '/v1/posts') {
+      const input = await json(req, res);
+      if (!input) return;
+      const text = typeof input.text === 'string' ? input.text.trim() : '';
+      const audience = input.audience || 'all';
+      if (!text || text.length > 2000 || !audiences.includes(audience)) return reply(res, 400, { error: 'invalid post' });
+      const post = await change(next => {
+        const item = { id: next.nextPost++, author: user, text, audience, time: Date.now() };
+        next.posts.push(item);
+        return item;
+      });
+      return reply(res, 200, post);
+    }
+    if (method === 'POST' && path === '/v1/posts/delete') {
+      const input = await json(req, res);
+      if (!input) return;
+      const removed = await change(next => {
+        const index = next.posts.findIndex(p => p.id === input.id && p.author === user);
+        if (index < 0) return false;
+        next.posts.splice(index, 1);
+        return true;
+      });
+      return removed ? reply(res, 200, { ok: true }) : reply(res, 404, { error: 'not found' });
+    }
+    if (method === 'GET' && path === '/v1/posts') {
+      const name = normalized(url.searchParams.get('name') || user);
+      const posts = state.posts.filter(p => p.author === name && canSee(user, name, p.audience)).slice(-100).reverse();
+      return reply(res, 200, { posts });
+    }
+    if (method === 'GET' && path === '/v1/feed') {
+      const posts = state.posts.filter(p => !Object.hasOwn(state.banned, p.author)
+        && (p.author === user || follows(user, p.author)) && canSee(user, p.author, p.audience)).slice(-100).reverse()
+        .map(p => ({ ...p, ...{ level: relation(user, p.author).level } }));
+      return reply(res, 200, { posts });
+    }
+    if (method === 'POST' && path === '/v1/stories') {
+      const input = await json(req, res, 600_000);
+      if (!input) return;
+      const audience = input.audience || 'all';
+      if (typeof input.image !== 'string' || !input.image || input.image.length > 500_000 || !base64Pattern.test(input.image) || !audiences.includes(audience))
+        return reply(res, 400, { error: 'invalid story' });
+      await change(next => { next.stories[user] = { image: input.image, audience, time: Date.now() }; });
+      return reply(res, 200, { ok: true });
+    }
+    if (method === 'POST' && path === '/v1/stories/delete') {
+      await change(next => { delete next.stories[user]; });
+      return reply(res, 200, { ok: true });
+    }
+    if (method === 'GET' && path === '/v1/stories') {
+      const stories = Object.keys(state.stories).filter(name => (name === user || follows(user, name)) && !Object.hasOwn(state.banned, name))
+        .map(name => [name, liveStory(name)]).filter(([name, story]) => story && canSee(user, name, story.audience))
+        .map(([name, story]) => ({ ...person(user, name), time: story.time, audience: story.audience }))
+        .sort((a, b) => (b.name === user) - (a.name === user) || b.pulse - a.pulse || b.time - a.time);
+      return reply(res, 200, { stories });
+    }
+    if (method === 'GET' && path === '/v1/story') {
+      const name = normalized(url.searchParams.get('name') || '');
+      const story = liveStory(name);
+      if (!story || !canSee(user, name, story.audience)) return reply(res, 404, { error: 'not found' });
+      return reply(res, 200, { name, image: story.image, time: story.time, audience: story.audience });
+    }
+    return null;
   }
   function removeMessage(next, from, id) {
     const index = next.messages.findIndex(m => m.from === from && m.id === id);
@@ -272,6 +445,7 @@ export async function createServer({ file, adminToken }) {
           .map(({ rseq, from, id }) => ({ rseq, from, id }));
         return reply(res, 200, { messages, removed });
       }
+      if (await social(req, res, url, user) !== null) return;
       if (req.method === 'POST' && url.pathname === '/v1/reports') {
         const input = await json(req, res);
         if (!input) return;

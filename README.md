@@ -106,3 +106,12 @@ gradle -p android --no-daemon :app:assembleDebug
 Чтобы стать главным админом: войдите в chatPuls Admin ключом сервера, откройте «Пользователи», выберите свой chatId → «Сделать главным админом». Потом можно входить аккаунтом.
 
 Admin API: заголовок `X-Pulse-Admin: <ключ>` или `Authorization: Bearer <сеанс>` аккаунта с ролью; `GET /v1/admin/me`, `POST /v1/admin/roles {name, role: user|admin|superadmin}`, `GET /v1/admin/stats`, `GET /v1/admin/users?q=`, `POST /v1/admin/users {name, action: ban|unban|logout}`, `GET /v1/admin/reports[?status=all]`, `POST /v1/admin/reports {id, action: dismiss|delete|ban|delete_ban}`. Пользовательский `POST /v1/reports {to, id?, reason}`.
+
+## Пульс дружбы: подписки и друзья
+
+- **Подписка** односторонняя. **Друзья** — когда подписаны друг на друга. **Близкие 💗** — друзья с пульсом от 60.
+- **Пульс дружбы** (0–100) считает сервер по переписке пары за последние 14 дней. Важна взаимность: учитывается меньшая из двух сторон (`25·log2(1 + min(a→b, b→a))`).
+- У записей на стене и у историй есть аудитория: все подписчики, только друзья или только близкие.
+- Профиль (имя, аватар, фон) отправляется на сервер и виден другим.
+
+API (сессия пользователя): `GET /v1/people?q=`, `GET /v1/friends`, `POST /v1/follow {name, follow}`, `GET|POST /v1/profile`, `POST /v1/posts {text, audience}`, `POST /v1/posts/delete {id}`, `GET /v1/posts?name=`, `GET /v1/feed`, `POST /v1/stories {image, audience}`, `POST /v1/stories/delete`, `GET /v1/stories`, `GET /v1/story?name=`.
