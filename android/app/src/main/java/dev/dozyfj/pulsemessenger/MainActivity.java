@@ -670,17 +670,6 @@ public final class MainActivity extends Activity {
         LinearLayout.LayoutParams headingParams = new LinearLayout.LayoutParams(0, -2, 1.0f);
         headingParams.setMargins(dp(6.0f), 0, dp(6.0f), 0);
         headingRow.addView(heading, headingParams);
-        this.profileShortcut = new FrameLayout(this);
-        this.profileShortcut.setContentDescription("Профиль");
-        this.profileShortcut.setTooltipText("Профиль");
-        this.profileShortcut.setFocusable(true);
-        this.profileShortcut.setOnClickListener(v -> openMainWall());
-        if (getResources().getConfiguration().screenWidthDp >= 340) {
-            headerLine.addView(this.profileShortcut, new FrameLayout.LayoutParams(dp(44.0f), dp(44.0f), Gravity.CENTER));
-        } else {
-            heading.addView(this.profileShortcut, new LinearLayout.LayoutParams(dp(44.0f), dp(44.0f)));
-        }
-
         this.headerTitle = text("", 20, headerInk(), true);
         this.headerTitle.setGravity(Gravity.CENTER);
         this.headerTitle.setSingleLine(true);
@@ -801,7 +790,12 @@ public final class MainActivity extends Activity {
         this.mainDock = new LinearLayout(this);
         this.mainDock.setPadding(dp(8.0f), dp(4.0f), dp(8.0f), dp(4.0f));
         this.mainDock.setBackground(barSurface(this.dark ? 0xA022262B : 0xA0F1F5F9, Gravity.TOP));
-        addDockTab("Главная", this::openMainWall);
+        this.profileShortcut = new FrameLayout(this);
+        this.profileShortcut.setContentDescription("Профиль");
+        this.profileShortcut.setTooltipText("Профиль");
+        this.profileShortcut.setFocusable(true);
+        this.profileShortcut.setOnClickListener(v -> openMainWall());
+        this.mainDock.addView(this.profileShortcut, new LinearLayout.LayoutParams(0, dp(44.0f), 1.0f));
         addDockTab("Чаты", this::showMainMessages);
         addDockTab("Контакты", () -> selectAllChatsTab(4));
         addDockTab("Звонки", () -> selectAllChatsTab(6));
@@ -1060,7 +1054,15 @@ public final class MainActivity extends Activity {
             return;
         }
         int selected = isChatsPage() ? 1 : this.page == 1 ? 2 : this.page == 7 ? 3 : 0;
-        for (int i = 0; i < this.mainDock.getChildCount(); i++) {
+        FrameLayout avatar = new FrameLayout(this);
+        showProfilePhoto(avatar, wallProfileKey(), "♙", 16, ink());
+        FrameLayout circle = storyCircle(avatar, hasStory(), false);
+        circle.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);
+        this.profileShortcut.removeAllViews();
+        this.profileShortcut.addView(circle, new FrameLayout.LayoutParams(dp(40.0f), dp(40.0f), Gravity.CENTER));
+        this.profileShortcut.setSelected(selected == 0);
+        this.profileShortcut.setBackground(selected == 0 ? glass(22) : null);
+        for (int i = 1; i < this.mainDock.getChildCount(); i++) {
             TextView tab = (TextView) this.mainDock.getChildAt(i);
             boolean active = i == selected;
             tab.setSelected(active);
@@ -4954,15 +4956,6 @@ public final class MainActivity extends Activity {
         boolean mainHeader = chatHeader && !this.searchMode;
         this.headerMenuButton.setVisibility(this.peer == null && !this.searchMode ? View.VISIBLE : View.GONE);
         this.pulseBrand.setVisibility(mainHeader ? View.VISIBLE : View.GONE);
-        this.profileShortcut.setVisibility(mainHeader ? View.VISIBLE : View.GONE);
-        if (mainHeader) {
-            FrameLayout avatar = new FrameLayout(this);
-            showProfilePhoto(avatar, wallProfileKey(), "♙", 16, ink());
-            FrameLayout circle = storyCircle(avatar, hasStory(), false);
-            circle.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);
-            this.profileShortcut.removeAllViews();
-            this.profileShortcut.addView(circle, new FrameLayout.LayoutParams(-1, -1));
-        }
         this.headerTitle.setVisibility(this.peer != null ? View.VISIBLE : View.GONE);
         this.notificationsButton.setVisibility(chatHeader ? View.VISIBLE : View.GONE);
         this.searchButton.setVisibility(chatHeader ? View.VISIBLE : View.GONE);
