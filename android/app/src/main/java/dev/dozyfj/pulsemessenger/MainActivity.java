@@ -184,6 +184,7 @@ public final class MainActivity extends Activity {
     private TextView pullRefreshHint;
     private boolean pullingRefresh;
     private View pulseBrand;
+    private TextView feedShortcut;
     private File recordingFile;
     private String requestedVoicePeer;
     private boolean resumed;
@@ -243,8 +244,7 @@ public final class MainActivity extends Activity {
         public void run() {
             MainActivity.this.sync();
             MainActivity.this.refreshHostControls();
-            // Пока приложение открыто, обновления проверяются раз в 3 минуты, а не только при запуске.
-            MainActivity.this.updates.checkIfStale(180_000L);
+            MainActivity.this.updates.checkIfNeeded();
             MainActivity.this.handler.postDelayed(this, 6000L);
         }
     };
@@ -659,6 +659,16 @@ public final class MainActivity extends Activity {
         headerLine.addView(this.pulseBrand, new FrameLayout.LayoutParams(-2, dp(40.0f), Gravity.CENTER));
         this.headerBack = headerControl("‹");
         headingRow.addView(this.headerBack, new LinearLayout.LayoutParams(dp(40.0f), dp(40.0f)));
+        this.feedShortcut = text("Фид", 14, headerInk(), true);
+        this.feedShortcut.setGravity(Gravity.CENTER);
+        this.feedShortcut.setFocusable(true);
+        this.feedShortcut.setOnClickListener(v -> {
+            this.openProfile = null;
+            this.friendsOpen = false;
+            this.feedSection = PROFILE_FEED;
+            openDockPage(6);
+        });
+        headingRow.addView(this.feedShortcut, new LinearLayout.LayoutParams(dp(74.0f), dp(44.0f)));
         this.settingsTabs = buildSettingsTabs(headingRow);
         buildClipsTabs(headingRow);
         LinearLayout heading = column();
@@ -1908,16 +1918,14 @@ public final class MainActivity extends Activity {
     }
 
     private void showFeedPage() {
-        showStories(this.content);
-        showMyWall(this.content);
-        boolean online = onlineAccount();
         if (this.feedSection == PROFILE_ALBUM) {
             showAlbum();
         } else if (this.feedSection == PROFILE_RECS) {
             showRecommendations();
         } else {
-            // Лента: поле новой записи и записи — свои и тех, на кого вы подписаны.
-            if (online) {
+            showStories(this.content);
+            showMyWall(this.content);
+            if (onlineAccount()) {
                 showPostComposer();
                 showServerFeed();
             } else {
@@ -3160,7 +3168,15 @@ public final class MainActivity extends Activity {
 
         Bitmap coverImage = loadImage(key, "cover");
         if (coverImage != null) {
-            ImageView picture = new ImageView(this);
+            ImageView picture = new ImageView(this) {
+                @Override
+                protected void onMeasure(int widthSpec, int heightSpec) {
+                    // При первом замере размер карточки задают её поля, а не исходное фото.
+                    int width = MeasureSpec.getMode(widthSpec) == MeasureSpec.EXACTLY ? MeasureSpec.getSize(widthSpec) : 0;
+                    int height = MeasureSpec.getMode(heightSpec) == MeasureSpec.EXACTLY ? MeasureSpec.getSize(heightSpec) : 0;
+                    setMeasuredDimension(width, height);
+                }
+            };
             picture.setScaleType(ImageView.ScaleType.CENTER_CROP);
             picture.setImageBitmap(coverImage);
             picture.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
@@ -4963,6 +4979,12 @@ public final class MainActivity extends Activity {
             return;
         }
         boolean chatHeader = this.peer == null && isMainPage();
+        this.feedShortcut.setVisibility(chatHeader && !this.searchMode ? View.VISIBLE : View.GONE);
+        boolean onWall = this.page == 6 && this.feedSection == PROFILE_FEED
+                && this.openProfile == null && !this.friendsOpen;
+        this.feedShortcut.setSelected(onWall);
+        this.feedShortcut.setTextColor(onWall ? onHeaderAccent() : headerInk());
+        this.feedShortcut.setBackground(onWall ? headerAccentPill() : glass(22));
         this.headerTitle.setVisibility(this.peer != null ? View.VISIBLE : View.GONE);
         this.notificationsButton.setVisibility(chatHeader ? View.VISIBLE : View.GONE);
         this.searchButton.setVisibility(chatHeader ? View.VISIBLE : View.GONE);
