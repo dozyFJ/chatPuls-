@@ -176,6 +176,17 @@ public final class MainActivity extends Activity {
     private LinearLayout stickyProfile;
     private View profileTabsAnchor;
     private boolean keepProfileTabs;
+    private boolean searchMode;
+    private String searchQuery = "";
+    private LinearLayout searchPanel;
+    private EditText searchInput;
+    private ImageView searchButton;
+    private final Runnable searchRefresh = () -> {
+        if (this.searchMode && this.peer == null) {
+            showSearchResults();
+            this.scroll.scrollTo(0, 0);
+        }
+    };
     private File playingFile;
     private SharedPreferences preferences;
     private TextView pullRefreshHint;
@@ -441,6 +452,10 @@ public final class MainActivity extends Activity {
 
     @Override
     public void onBackPressed() {
+        if (this.searchMode && !this.feedOpen) {
+            closeSearch();
+            return;
+        }
         if (!this.feedOpen) {
             if (this.peer == null) {
                 if (!this.sectionArchive) {
@@ -649,6 +664,20 @@ public final class MainActivity extends Activity {
         this.status = text("", 12, this.dark ? 0xFFB9BCC0 : 0xFF5C5C5C, false);
         this.status.setGravity(Gravity.CENTER);
         heading.addView(this.status);
+        this.searchButton = new ImageView(this);
+        GradientDrawable searchBackground = surface(this.dark ? 0xFF2D2F32 : 0xFFF2F4F6, 24, this.dark ? 0x55FFFFFF : 0x55798089);
+        searchBackground.setShape(GradientDrawable.OVAL);
+        this.searchButton.setBackground(searchBackground);
+        this.searchButton.setPadding(dp(11.0f), dp(11.0f), dp(11.0f), dp(11.0f));
+        this.searchButton.setImageResource(R.drawable.ic_search);
+        this.searchButton.setImageTintList(ColorStateList.valueOf(headerInk()));
+        this.searchButton.setContentDescription("Поиск");
+        this.searchButton.setTooltipText("Поиск");
+        this.searchButton.setFocusable(true);
+        this.searchButton.setOnClickListener(v -> openSearch());
+        LinearLayout.LayoutParams searchParams = new LinearLayout.LayoutParams(dp(44.0f), dp(44.0f));
+        searchParams.setMarginStart(dp(6.0f));
+        headingRow.addView(this.searchButton, searchParams);
         this.notificationsButton = new ImageView(this);
         GradientDrawable notificationBackground = surface(this.dark ? 0xFF2D2F32 : 0xFFF2F4F6, 24, this.dark ? 0x55FFFFFF : 0x55798089);
         notificationBackground.setShape(1);
@@ -683,6 +712,7 @@ public final class MainActivity extends Activity {
         this.videoCallButton = addCallButton(headingRow, R.drawable.ic_video_call, "Видеозвонок");
         this.headerAction = headerControl("↻");
         headingRow.addView(this.headerAction, new LinearLayout.LayoutParams(dp(38.0f), dp(40.0f)));
+        buildSearchPanel(headerLine);
         buildCallFilters(column);
         FrameLayout body = new FrameLayout(this);
         this.body = body;
@@ -1004,6 +1034,11 @@ public final class MainActivity extends Activity {
 
     private void render() {
         removeStickyProfile();
+        if (this.searchMode && (this.peer != null || !isMainPage())) {
+            this.searchMode = false;
+            this.searchQuery = "";
+            this.searchPanel.setVisibility(View.GONE);
+        }
         finishVoiceRecording(false);
         this.voiceButton = null;
         this.revealedChat = null;
@@ -1026,7 +1061,7 @@ public final class MainActivity extends Activity {
         renderCallFilters();
         renderSectionTabs();
         boolean showEmptySection = this.page == 0 && isMainSectionOpen() && this.allChatsTab != 0;
-        boolean showFab = this.peer == null && !showEmptySection && (this.page == 0 || this.page == 1);
+        boolean showFab = !this.searchMode && this.peer == null && !showEmptySection && (this.page == 0 || this.page == 1);
         if (showFab) {
             String label = this.page == 1 ? "Новый контакт" : "Создать чат";
             this.createButton.setText("+  " + label);
@@ -1059,7 +1094,9 @@ public final class MainActivity extends Activity {
             render();
 
         });
-        if (this.peer != null) {
+        if (this.searchMode && this.peer == null) {
+            showSearchResults();
+        } else if (this.peer != null) {
             showConversation();
         } else if (this.page == 2) {
             showSettings();
@@ -1931,6 +1968,255 @@ public final class MainActivity extends Activity {
         } else {
             showStories(this.content);
             showWallPosts(false);
+        }
+    }
+
+    // ---- Поиск по всему приложению: чаты, контакты, сообщения, стена, звонки ----
+
+    private void buildSearchPanel(FrameLayout headerLine) {
+        LinearLayout panel = new LinearLayout(this);
+        panel.setGravity(Gravity.CENTER_VERTICAL);
+        int inset = dp(getResources().getConfiguration().screenWidthDp >= 360 ? 14.0f : 10.0f);
+        panel.setPadding(inset, dp(6.0f), inset, dp(6.0f));
+        panel.setBackground(headerSurface());
+        panel.setVisibility(View.GONE);
+        panel.setClickable(true);
+        TextView back = headerControl("‹");
+        back.setContentDescription("Закрыть поиск");
+        back.setOnClickListener(v -> closeSearch());
+        panel.addView(back, new LinearLayout.LayoutParams(dp(40.0f), dp(40.0f)));
+        LinearLayout box = new LinearLayout(this);
+        box.setGravity(Gravity.CENTER_VERTICAL);
+        box.setPadding(dp(12.0f), 0, dp(4.0f), 0);
+        box.setBackground(surface(this.dark ? 0xFF2D2F32 : 0xFFF2F4F6, 22, this.dark ? 0x55FFFFFF : 0x55798089));
+        LinearLayout.LayoutParams boxParams = new LinearLayout.LayoutParams(0, dp(44.0f), 1.0f);
+        boxParams.setMarginStart(dp(6.0f));
+        panel.addView(box, boxParams);
+        ImageView lens = new ImageView(this);
+        lens.setImageResource(R.drawable.ic_search);
+        lens.setImageTintList(ColorStateList.valueOf(muted()));
+        box.addView(lens, new LinearLayout.LayoutParams(dp(20.0f), dp(20.0f)));
+        this.searchInput = new EditText(this);
+        this.searchInput.setHint("Поиск: чаты, сообщения, стена…");
+        this.searchInput.setHintTextColor(muted());
+        this.searchInput.setTextColor(headerInk());
+        this.searchInput.setTextSize(15);
+        this.searchInput.setSingleLine(true);
+        this.searchInput.setBackground(null);
+        this.searchInput.setImeOptions(android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH);
+        this.searchInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
+        LinearLayout.LayoutParams inputParams = new LinearLayout.LayoutParams(0, -1, 1.0f);
+        inputParams.setMarginStart(dp(8.0f));
+        box.addView(this.searchInput, inputParams);
+        TextView clear = text("×", 22, muted(), false);
+        clear.setGravity(Gravity.CENTER);
+        clear.setContentDescription("Очистить");
+        clear.setOnClickListener(v -> this.searchInput.setText(""));
+        box.addView(clear, new LinearLayout.LayoutParams(dp(36.0f), -1));
+        this.searchInput.addTextChangedListener(new TextWatcher() {
+            @Override
+            public void beforeTextChanged(CharSequence s, int start, int count, int after) {
+            }
+
+            @Override
+            public void onTextChanged(CharSequence s, int start, int before, int count) {
+            }
+
+            @Override
+            public void afterTextChanged(Editable editable) {
+                MainActivity.this.searchQuery = editable.toString().trim();
+                MainActivity.this.handler.removeCallbacks(MainActivity.this.searchRefresh);
+                MainActivity.this.handler.postDelayed(MainActivity.this.searchRefresh, 200L);
+            }
+        });
+        headerLine.addView(panel, new FrameLayout.LayoutParams(-1, -1));
+        this.searchPanel = panel;
+    }
+
+    private void openSearch() {
+        this.searchMode = true;
+        this.searchPanel.setVisibility(View.VISIBLE);
+        this.searchPanel.setAlpha(0.0f);
+        this.searchPanel.animate().alpha(1.0f).setDuration(140L).start();
+        this.searchInput.setText(this.searchQuery);
+        this.searchInput.requestFocus();
+        android.view.inputmethod.InputMethodManager keyboard = getSystemService(android.view.inputmethod.InputMethodManager.class);
+        if (keyboard != null) {
+            keyboard.showSoftInput(this.searchInput, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT);
+        }
+        render();
+    }
+
+    private void closeSearch() {
+        if (!this.searchMode) {
+            return;
+        }
+        this.searchMode = false;
+        this.searchQuery = "";
+        this.handler.removeCallbacks(this.searchRefresh);
+        android.view.inputmethod.InputMethodManager keyboard = getSystemService(android.view.inputmethod.InputMethodManager.class);
+        if (keyboard != null) {
+            keyboard.hideSoftInputFromWindow(this.searchInput.getWindowToken(), 0);
+        }
+        this.searchPanel.setVisibility(View.GONE);
+        render();
+    }
+
+    private void openFromSearch(String name) {
+        this.searchMode = false;
+        this.searchQuery = "";
+        android.view.inputmethod.InputMethodManager keyboard = getSystemService(android.view.inputmethod.InputMethodManager.class);
+        if (keyboard != null) {
+            keyboard.hideSoftInputFromWindow(this.searchInput.getWindowToken(), 0);
+        }
+        this.searchPanel.setVisibility(View.GONE);
+        this.peer = name;
+        this.page = 0;
+        render();
+    }
+
+    /** Текст с подсвеченным совпадением. */
+    private CharSequence highlight(String value, String query) {
+        android.text.SpannableString result = new android.text.SpannableString(value);
+        if (query.isEmpty()) {
+            return result;
+        }
+        String lower = value.toLowerCase(Locale.ROOT);
+        String needle = query.toLowerCase(Locale.ROOT);
+        int index = lower.indexOf(needle);
+        while (index >= 0) {
+            result.setSpan(new android.text.style.StyleSpan(Typeface.BOLD), index, index + needle.length(), android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            result.setSpan(new android.text.style.ForegroundColorSpan(accent()), index, index + needle.length(), android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            index = lower.indexOf(needle, index + needle.length());
+        }
+        return result;
+    }
+
+    /** Отрывок вокруг совпадения, чтобы найденное слово было видно в одной строке. */
+    private static String excerpt(String text, String query) {
+        String flat = text.replace('\n', ' ');
+        int index = flat.toLowerCase(Locale.ROOT).indexOf(query.toLowerCase(Locale.ROOT));
+        if (index <= 30) {
+            return flat;
+        }
+        return "…" + flat.substring(index - 25);
+    }
+
+    private TextView searchSection(String title) {
+        TextView label = text(title, 13, muted(), true);
+        label.setPadding(dp(4.0f), dp(10.0f), 0, dp(6.0f));
+        this.content.addView(label);
+        return label;
+    }
+
+    private LinearLayout searchRow(View leading, CharSequence title, CharSequence subtitle, Runnable open) {
+        LinearLayout row = new LinearLayout(this);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(12.0f), dp(10.0f), dp(12.0f), dp(10.0f));
+        row.setBackground(card());
+        row.setFocusable(true);
+        row.setClickable(true);
+        if (open != null) {
+            row.setOnClickListener(v -> open.run());
+        }
+        if (leading != null) {
+            LinearLayout.LayoutParams leadingParams = new LinearLayout.LayoutParams(dp(36.0f), dp(36.0f));
+            leadingParams.setMarginEnd(dp(10.0f));
+            row.addView(leading, leadingParams);
+        }
+        LinearLayout texts = column();
+        row.addView(texts, new LinearLayout.LayoutParams(0, -2, 1.0f));
+        TextView first = text("", 15, ink(), true);
+        first.setText(title);
+        first.setSingleLine(true);
+        first.setEllipsize(TextUtils.TruncateAt.END);
+        texts.addView(first);
+        if (subtitle != null) {
+            TextView second = text("", 13, muted(), false);
+            second.setText(subtitle);
+            second.setMaxLines(2);
+            second.setEllipsize(TextUtils.TruncateAt.END);
+            texts.addView(second);
+        }
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, -2);
+        params.bottomMargin = dp(8.0f);
+        this.content.addView(row, params);
+        return row;
+    }
+
+    private void showSearchResults() {
+        this.content.removeAllViews();
+        final String query = this.searchQuery;
+        if (query.isEmpty()) {
+            newCard().addView(text("Ищите по чатам, контактам, сообщениям, записям на стене и звонкам.", 14, muted(), false));
+            return;
+        }
+        String needle = query.toLowerCase(Locale.ROOT);
+        int found = 0;
+        List<String> chats = new ArrayList<>();
+        for (String name : this.store.chats(owner())) {
+            if (name.toLowerCase(Locale.ROOT).contains(needle)) {
+                chats.add(name);
+            }
+        }
+        if (!chats.isEmpty()) {
+            searchSection("Чаты и контакты");
+            for (String name : chats) {
+                searchRow(chatAvatar(name), highlight(name, query), this.store.isArchived(owner(), name) ? "в архиве" : null, () -> openFromSearch(name));
+                found++;
+            }
+        }
+        List<ChatStore.Message> messages = this.store.searchMessages(owner(), user(), query, 50);
+        if (!messages.isEmpty()) {
+            searchSection("Сообщения");
+            for (ChatStore.Message message : messages) {
+                final String peer = message.from().equals(user()) ? message.to() : message.from();
+                String when = DateUtils.getRelativeTimeSpanString(message.time(), System.currentTimeMillis(), DateUtils.MINUTE_IN_MILLIS).toString();
+                String who = message.from().equals(user()) ? "Вы → " + peer : peer;
+                searchRow(chatAvatar(peer), who + " · " + when, highlight(excerpt(message.text(), query), query), () -> openFromSearch(peer));
+                found++;
+            }
+        }
+        org.json.JSONArray posts = wallPosts();
+        boolean wallHeader = false;
+        for (int i = 0; i < posts.length(); i++) {
+            JSONObject post = posts.optJSONObject(i);
+            if (post == null || !post.optString("text").toLowerCase(Locale.ROOT).contains(needle)) {
+                continue;
+            }
+            if (!wallHeader) {
+                searchSection("Записи на стене");
+                wallHeader = true;
+            }
+            String when = DateUtils.getRelativeTimeSpanString(post.optLong("time"), System.currentTimeMillis(), DateUtils.MINUTE_IN_MILLIS).toString();
+            searchRow(null, when, highlight(excerpt(post.optString("text"), query), query), () -> {
+                this.searchMode = false;
+                this.searchQuery = "";
+                this.searchPanel.setVisibility(View.GONE);
+                this.feedSection = PROFILE_WALL;
+                selectAllChatsTab(5);
+            });
+            found++;
+        }
+        boolean callsHeader = false;
+        for (CallHistory.Entry entry : this.callHistory.entries(owner())) {
+            if (!entry.peer().toLowerCase(Locale.ROOT).contains(needle)) {
+                continue;
+            }
+            if (!callsHeader) {
+                searchSection("Звонки");
+                callsHeader = true;
+            }
+            String details = (entry.incoming() ? "Входящий" : "Исходящий") + " · " + entry.outcome().label + " · "
+                    + DateUtils.formatDateTime(this, entry.time(), DateUtils.FORMAT_SHOW_DATE | DateUtils.FORMAT_SHOW_TIME);
+            searchRow(chatAvatar(entry.peer()), highlight(entry.peer(), query), details, () -> openFromSearch(entry.peer()));
+            found++;
+            if (found > 200) {
+                break;
+            }
+        }
+        if (found == 0) {
+            newCard().addView(text("По запросу «" + query + "» ничего не нашлось.", 14, muted(), false));
         }
     }
 
@@ -4136,6 +4422,7 @@ public final class MainActivity extends Activity {
         boolean chatHeader = this.peer == null && isMainPage();
         this.headerTitle.setVisibility(this.peer != null ? View.VISIBLE : View.GONE);
         this.notificationsButton.setVisibility(chatHeader ? View.VISIBLE : View.GONE);
+        this.searchButton.setVisibility(chatHeader ? View.VISIBLE : View.GONE);
         this.headerBack.setVisibility(this.peer != null ? View.VISIBLE : View.GONE);
         this.headerAction.setVisibility(this.peer != null ? View.VISIBLE : View.GONE);
         this.audioCallButton.setVisibility(this.peer != null ? View.VISIBLE : View.GONE);

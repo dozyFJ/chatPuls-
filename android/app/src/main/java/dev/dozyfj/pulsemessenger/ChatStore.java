@@ -217,6 +217,21 @@ final class ChatStore extends SQLiteOpenHelper {
         return latest;
     }
 
+    /** Поиск по тексту сообщений (без голосовых данных). Регистр не важен для латиницы и кириллицы. */
+    List<Message> searchMessages(String owner, String user, String query, int limit) {
+        List<Message> result = new ArrayList<>();
+        String needle = query.toLowerCase(java.util.Locale.ROOT);
+        try (Cursor c = getReadableDatabase().rawQuery("SELECT id,sender,recipient,body,created,sequence,pending,'' FROM messages WHERE owner = ? AND (sender = ? OR recipient = ?) AND audio = '' ORDER BY created DESC",
+                new String[]{owner, user, user})) {
+            while (c.moveToNext() && result.size() < limit) {
+                if (c.getString(3).toLowerCase(java.util.Locale.ROOT).contains(needle)) {
+                    result.add(fromCursor(c));
+                }
+            }
+        }
+        return result;
+    }
+
     void markRead(String owner, String user, String peer, long throughSequence) {
         ContentValues values = new ContentValues();
         values.put("unread", 0);
