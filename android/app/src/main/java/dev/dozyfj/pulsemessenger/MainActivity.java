@@ -561,7 +561,7 @@ public final class MainActivity extends Activity {
     }
 
     private Drawable headerSurface() {
-        return barSurface(this.dark ? 0xC71C1E21 : 0xC7EEF1F4, 80);
+        return barSurface(this.dark ? 0x8C1C1E21 : 0x8CF4F6F8, 80);
     }
 
     private int surfaceOutline() {
@@ -578,9 +578,9 @@ public final class MainActivity extends Activity {
      */
     private GradientDrawable glass(int radius) {
         GradientDrawable shape = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, this.dark
-                ? new int[]{0x7A34373C, 0x5C202226} : new int[]{0xC7FFFFFF, 0x9EFFFFFF});
+                ? new int[]{0x6634373C, 0x47202226} : new int[]{0x8CFFFFFF, 0x52FFFFFF});
         shape.setCornerRadius(dp(radius));
-        shape.setStroke(dp(1.0f), this.dark ? 0x38FFFFFF : 0xB3FFFFFF);
+        shape.setStroke(dp(1.0f), this.dark ? 0x33FFFFFF : 0xA6FFFFFF);
         return shape;
     }
 
@@ -685,7 +685,7 @@ public final class MainActivity extends Activity {
         this.status.setGravity(Gravity.CENTER);
         heading.addView(this.status);
         this.searchButton = new ImageView(this);
-        GradientDrawable searchBackground = surface(this.dark ? 0xFF2D2F32 : 0xFFF2F4F6, 24, this.dark ? 0x55FFFFFF : 0x55798089);
+        GradientDrawable searchBackground = surface(this.dark ? 0x732D2F32 : 0x80FFFFFF, 24, this.dark ? 0x55FFFFFF : 0x55798089);
         searchBackground.setShape(GradientDrawable.OVAL);
         this.searchButton.setBackground(searchBackground);
         this.searchButton.setPadding(dp(11.0f), dp(11.0f), dp(11.0f), dp(11.0f));
@@ -699,7 +699,7 @@ public final class MainActivity extends Activity {
         searchParams.setMarginStart(dp(6.0f));
         headingRow.addView(this.searchButton, searchParams);
         this.notificationsButton = new ImageView(this);
-        GradientDrawable notificationBackground = surface(this.dark ? 0xFF2D2F32 : 0xFFF2F4F6, 24, this.dark ? 0x55FFFFFF : 0x55798089);
+        GradientDrawable notificationBackground = surface(this.dark ? 0x732D2F32 : 0x80FFFFFF, 24, this.dark ? 0x55FFFFFF : 0x55798089);
         notificationBackground.setShape(1);
         this.notificationsButton.setBackground(notificationBackground);
         this.notificationsButton.setPadding(dp(11.0f), dp(11.0f), dp(11.0f), dp(11.0f));
@@ -719,7 +719,7 @@ public final class MainActivity extends Activity {
         this.audioCallButton.setPadding(dp(7.0f), 0, dp(7.0f), 0);
         this.audioCallButton.setCompoundDrawablePadding(dp(4.0f));
         this.audioCallButton.setCompoundDrawablesRelative(handset, null, null, null);
-        this.audioCallButton.setBackground(surface(this.dark ? 0xFF2D2F32 : 0xFFF2F4F6, 18, surfaceOutline()));
+        this.audioCallButton.setBackground(surface(this.dark ? 0x732D2F32 : 0x80FFFFFF, 18, surfaceOutline()));
         this.audioCallButton.setContentDescription("Аудиозвонок");
         this.audioCallButton.setFocusable(true);
         this.audioCallButton.setOnClickListener(v -> {
@@ -798,7 +798,7 @@ public final class MainActivity extends Activity {
         this.dock = new LinearLayout(this);
         this.dock.setGravity(Gravity.CENTER_VERTICAL);
         this.dock.setPadding(dp(4.0f), dp(3.0f), dp(4.0f), dp(3.0f));
-        int dockColor = this.dark ? 0xC71C1E21 : 0xC7EEF1F4;
+        int dockColor = this.dark ? 0x8C1C1E21 : 0x8CF4F6F8;
         this.dock.setBackground(barSurface(dockColor, 48));
         column.addView(this.dock, new LinearLayout.LayoutParams(-1, -2));
         buildFeedDrawer(frameLayout, background);
@@ -1265,7 +1265,7 @@ public final class MainActivity extends Activity {
         LinearLayout badge = new LinearLayout(this);
         badge.setGravity(Gravity.CENTER);
         badge.setPadding(dp(12.0f), 0, dp(12.0f), 0);
-        badge.setBackground(surface(this.dark ? 0xFF2A2C2F : 0xFFF1F3F5, 17, surfaceOutline()));
+        badge.setBackground(surface(this.dark ? 0x732A2C2F : 0x80FFFFFF, 17, surfaceOutline()));
         ImageView icon = new ImageView(this);
         icon.setImageResource(R.drawable.ic_pulse_mark);
         icon.setImageTintList(ColorStateList.valueOf(headerInk()));
@@ -1382,7 +1382,7 @@ public final class MainActivity extends Activity {
         if (selected) {
             surface = headerAccentPill();
         } else {
-            surface = surface(this.dark ? 0xFF2A2C2F : 0xFFF1F3F5, 22, surfaceOutline());
+            surface = surface(this.dark ? 0x732A2C2F : 0x80FFFFFF, 22, surfaceOutline());
         }
         view.setBackground(surface);
         this.feedTabLabel.setTextColor(selected ? onHeaderAccent() : headerInk());
@@ -2042,7 +2042,8 @@ public final class MainActivity extends Activity {
         panel.setGravity(Gravity.CENTER_VERTICAL);
         int inset = dp(getResources().getConfiguration().screenWidthDp >= 360 ? 14.0f : 10.0f);
         panel.setPadding(inset, dp(6.0f), inset, dp(6.0f));
-        panel.setBackground(headerSurface());
+        // Панель поиска перекрывает шапку, поэтому она почти непрозрачная — иначе под ней видны кнопки.
+        panel.setBackground(barSurface(this.dark ? 0xF71C1E21 : 0xF7F4F6F8, 80));
         panel.setVisibility(View.GONE);
         panel.setClickable(true);
         TextView back = headerControl("‹");
@@ -2052,7 +2053,7 @@ public final class MainActivity extends Activity {
         LinearLayout box = new LinearLayout(this);
         box.setGravity(Gravity.CENTER_VERTICAL);
         box.setPadding(dp(12.0f), 0, dp(4.0f), 0);
-        box.setBackground(surface(this.dark ? 0xFF2D2F32 : 0xFFF2F4F6, 22, this.dark ? 0x55FFFFFF : 0x55798089));
+        box.setBackground(surface(this.dark ? 0x732D2F32 : 0x80FFFFFF, 22, this.dark ? 0x55FFFFFF : 0x55798089));
         LinearLayout.LayoutParams boxParams = new LinearLayout.LayoutParams(0, dp(44.0f), 1.0f);
         boxParams.setMarginStart(dp(6.0f));
         panel.addView(box, boxParams);
@@ -3624,7 +3625,7 @@ public final class MainActivity extends Activity {
         LinearLayout rail = column();
         rail.setGravity(Gravity.TOP | Gravity.CENTER_HORIZONTAL);
         rail.setPadding(0, dp(8.0f), 0, dp(8.0f));
-        rail.setBackground(surface(this.dark ? 0xFF222426 : 0xFFE6EAEE, 18, surfaceOutline()));
+        rail.setBackground(glass(18));
         LinearLayout.LayoutParams railParams = new LinearLayout.LayoutParams(dp(54.0f), -1);
         railParams.setMarginEnd(dp(10.0f));
         linearLayout.addView(rail, railParams);
