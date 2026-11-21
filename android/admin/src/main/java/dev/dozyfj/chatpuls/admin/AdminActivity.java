@@ -100,10 +100,21 @@ public final class AdminActivity extends Activity {
         super.onResume();
         this.updates.bind(this.updateListener);
         this.updates.checkIfNeeded();
+        this.handler.removeCallbacks(this.updatePoll);
+        this.handler.postDelayed(this.updatePoll, 180_000L);
     }
+
+    private final Runnable updatePoll = new Runnable() {
+        @Override
+        public void run() {
+            AdminActivity.this.updates.checkIfStale(180_000L);
+            AdminActivity.this.handler.postDelayed(this, 180_000L);
+        }
+    };
 
     @Override
     protected void onPause() {
+        this.handler.removeCallbacks(this.updatePoll);
         this.updates.unbind(this.updateListener);
         super.onPause();
     }

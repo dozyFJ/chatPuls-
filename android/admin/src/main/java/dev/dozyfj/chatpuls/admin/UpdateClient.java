@@ -69,7 +69,8 @@ final class UpdateClient implements UpdateManager.Source {
 
     @Override
     public Update check() throws Exception {
-        String manifestUrl = "https://raw.githubusercontent.com/dozyFJ/chatPuls-/refs/heads/updates/admin-latest.json";
+        // Запасной адрес с меткой времени: так CDN GitHub не отдаёт устаревший манифест до 5 минут.
+        String manifestUrl = "https://raw.githubusercontent.com/dozyFJ/chatPuls-/refs/heads/updates/admin-latest.json?t=" + System.currentTimeMillis();
         try {
             manifestUrl = manifestUrlForRef(readUpdateJson(UPDATES_REF));
         } catch (IOException e) {

@@ -228,11 +228,10 @@ public final class MainActivity extends Activity {
     private static final String[] FEED_SECTIONS = {"Мой профиль", "Чаты", "Каналы", "Сообщества", "Контакты", "Звонки"};
     private static final int[] FEED_SECTION_TABS = {-1, 0, 2, 3, 4, 6};
     private static final int[] FEED_SECTION_ICONS = {R.drawable.ic_feed_profile, R.drawable.ic_pulse_mark, R.drawable.ic_feed_channels, R.drawable.ic_community_rail, R.drawable.ic_feed_profile, R.drawable.ic_audio_call};
-    private static final String[] PROFILE_SECTIONS = {"Лента", "Стена", "Фотоальбом", "Реки"};
-    private static final int PROFILE_RECS = 3;
+    private static final String[] PROFILE_SECTIONS = {"Лента", "Альбом", "Рекомендации"};
     private static final int PROFILE_FEED = 0;
-    private static final int PROFILE_WALL = 1;
-    private static final int PROFILE_ALBUM = 2;
+    private static final int PROFILE_ALBUM = 1;
+    private static final int PROFILE_RECS = 2;
     private static final int ALBUM_PICKER = 47;
     private static final String[] SETTINGS_TABS = {"Приложение", "Аккаунт", "Сервер"};
     private static final String[] SETTINGS_ICONS = {"⚙", "♙", "▤"};
@@ -256,6 +255,8 @@ public final class MainActivity extends Activity {
         public void run() {
             MainActivity.this.sync();
             MainActivity.this.refreshHostControls();
+            // Пока приложение открыто, обновления проверяются раз в 3 минуты, а не только при запуске.
+            MainActivity.this.updates.checkIfStale(180_000L);
             MainActivity.this.handler.postDelayed(this, 6000L);
         }
     };
@@ -1338,7 +1339,7 @@ public final class MainActivity extends Activity {
     }
 
     private void swipeMainPage(int direction) {
-        // В профиле свайп листает вкладки Лента → Стена → Фотоальбом → Реки, на краях — разделы.
+        // В профиле свайп листает вкладки Лента → Альбом → Рекомендации, на краях — разделы.
         if (this.page == 6 && this.openProfile == null && !this.friendsOpen) {
             int next = this.feedSection + direction;
             if (next >= 0 && next < PROFILE_SECTIONS.length) {
@@ -2006,22 +2007,18 @@ public final class MainActivity extends Activity {
         this.profileTabsAnchor = sections;
         buildStickyProfile();
         boolean online = onlineAccount();
-        if (this.feedSection == PROFILE_WALL) {
-            if (online) {
-                showServerWall();
-            } else {
-                showWallPosts(true);
-            }
-        } else if (this.feedSection == PROFILE_ALBUM) {
+        if (this.feedSection == PROFILE_ALBUM) {
             showAlbum();
         } else if (this.feedSection == PROFILE_RECS) {
             showRecommendations();
         } else {
+            // Лента: истории, поле новой записи и записи — свои и тех, на кого вы подписаны.
             showStories(this.content);
             if (online) {
+                showPostComposer();
                 showServerFeed();
             } else {
-                showWallPosts(false);
+                showWallPosts(true);
             }
         }
     }
@@ -2248,7 +2245,7 @@ public final class MainActivity extends Activity {
                 this.searchMode = false;
                 this.searchQuery = "";
                 this.searchPanel.setVisibility(View.GONE);
-                this.feedSection = PROFILE_WALL;
+                this.feedSection = PROFILE_FEED;
                 selectAllChatsTab(5);
             });
             found++;
@@ -2647,7 +2644,7 @@ public final class MainActivity extends Activity {
                     list.addView(stats);
                     JSONArray people = result.optJSONArray("people");
                     if (people == null || people.length() == 0) {
-                        newCard(list).addView(text("Пока никого. Найдите людей по chatId выше или загляните в «Реки».", 14, muted(), false));
+                        newCard(list).addView(text("Пока никого. Найдите людей по chatId выше или загляните в «Рекомендации».", 14, muted(), false));
                         return;
                     }
                     for (int i = 0; i < people.length(); i++) {
@@ -2881,8 +2878,8 @@ public final class MainActivity extends Activity {
         }
     }
 
-    /** Стена на сервере: поле записи с выбором, кому видно, и свои записи. */
-    private void showServerWall() {
+    /** Поле новой записи с выбором, кому она видна. */
+    private void showPostComposer() {
         LinearLayout card = newCard();
         final EditText input = field("Что у вас нового?", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
         input.setSingleLine(false);
@@ -2918,10 +2915,6 @@ public final class MainActivity extends Activity {
             } catch (JSONException ignored) {
             }
         });
-        final LinearLayout list = column();
-        this.content.addView(list, new LinearLayout.LayoutParams(-1, -2));
-        serverCall("/v1/posts", null, result -> showPosts(list, result.optJSONArray("posts"), "Записей на стене пока нет. Напишите первую."), () ->
-                newCard(list).addView(text("Нет связи с сервером", 14, muted(), false)));
     }
 
     private void showServerFeed() {
@@ -2930,14 +2923,14 @@ public final class MainActivity extends Activity {
         newCard(list).addView(text("Загрузка ленты…", 14, muted(), false));
         serverCall("/v1/feed", null, result -> {
             list.removeAllViews();
-            showPosts(list, result.optJSONArray("posts"), "В ленте пока пусто. Подпишитесь на людей во вкладке «Реки» — их записи появятся здесь.");
+            showPosts(list, result.optJSONArray("posts"), "В ленте пока пусто. Напишите первую запись или подпишитесь на людей во вкладке «Рекомендации».");
         }, () -> {
             list.removeAllViews();
             newCard(list).addView(text("Нет связи с сервером", 14, muted(), false));
         });
     }
 
-    /** «Реки»: рекомендации людей — сначала те, кто на вас подписан, и с кем уже есть пульс. */
+    /** «Рекомендации»: люди — сначала те, кто на вас подписан, и с кем уже есть пульс. */
     private void showRecommendations() {
         final LinearLayout list = column();
         this.content.addView(list, new LinearLayout.LayoutParams(-1, -2));
@@ -3233,7 +3226,7 @@ public final class MainActivity extends Activity {
         LinearLayout top = new LinearLayout(this);
         top.setGravity(Gravity.CENTER_VERTICAL);
         final List<String> photos = albumPhotos();
-        top.addView(text(photos.isEmpty() ? "Фотоальбом" : "Фотоальбом · " + photos.size(), 16, ink(), true), new LinearLayout.LayoutParams(0, -2, 1.0f));
+        top.addView(text(photos.isEmpty() ? "Альбом" : "Альбом · " + photos.size(), 16, ink(), true), new LinearLayout.LayoutParams(0, -2, 1.0f));
         Button add = button("+ Фото", true);
         top.addView(add, new LinearLayout.LayoutParams(-2, dp(40.0f)));
         add.setOnClickListener(v -> pickAlbumPhotos());
@@ -3262,7 +3255,7 @@ public final class MainActivity extends Activity {
             thumb.setBackground(surface(this.dark ? 0xFF2A2C2F : 0xFFE6EAED, 10, 0));
             thumb.setClipToOutline(true);
             thumb.setContentDescription("Фото " + (i + 1));
-            thumb.setOnClickListener(v -> openImage(Uri.parse(photo), "Фотоальбом"));
+            thumb.setOnClickListener(v -> openImage(Uri.parse(photo), "Альбом"));
             thumb.setOnLongClickListener(v -> {
                 showDialog(new AlertDialog.Builder(this).setTitle("Убрать фото из альбома?").setMessage("Само фото в галерее останется.")
                         .setNegativeButton("Отмена", null).setPositiveButton("Убрать", (dialog, which) -> {

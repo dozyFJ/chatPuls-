@@ -20,6 +20,7 @@ final class UpdateManager {
     private final ExecutorService executor = Executors.newSingleThreadExecutor(runnable -> UpdateManager.newWorkerThread(runnable));
     private final Handler main = new Handler(Looper.getMainLooper());
     private Phase phase = Phase.IDLE;
+    private long lastCheck;
 
     interface Listener {
         void changed();
@@ -98,20 +99,46 @@ final class UpdateManager {
     }
 
     void checkIfNeeded() {
-        if (this.phase == Phase.IDLE || this.phase == Phase.CURRENT || this.phase == Phase.ERROR) {
-            check();
+        checkIfStale(60_000L);
+    }
+
+    /**
+     * Проверяет обновления, если с прошлой проверки прошло больше maxAge.
+     * Раньше проверка шла только при открытии приложения, а уже скачанное обновление
+     * больше не перепроверялось — поэтому новые версии приходили с задержкой.
+     */
+    void checkIfStale(long maxAge) {
+        if (this.phase == Phase.CHECKING || this.phase == Phase.DOWNLOADING) {
+            return;
         }
+        if (this.phase != Phase.IDLE && android.os.SystemClock.elapsedRealtime() - this.lastCheck < maxAge) {
+            return;
+        }
+        check();
     }
 
     void check() {
         if (this.phase == Phase.CHECKING || this.phase == Phase.DOWNLOADING) {
             return;
         }
+        final UpdateClient.Update ready = this.phase == Phase.READY ? this.update : null;
+        final File readyApk = this.phase == Phase.READY ? this.apk : null;
+        this.lastCheck = android.os.SystemClock.elapsedRealtime();
         this.phase = Phase.CHECKING;
         changed();
         this.executor.execute(() -> {
             try {
                 final UpdateClient.Update next = this.client.check();
+                if (next != null && ready != null && readyApk != null && next.code() == ready.code() && readyApk.isFile()) {
+                    // Та же версия уже скачана — не качаем заново и не показываем предложение повторно.
+                    this.main.post(() -> {
+                        this.update = ready;
+                        this.apk = readyApk;
+                        this.phase = Phase.READY;
+                        changed();
+                    });
+                    return;
+                }
                 if (next == null) {
                     this.main.post(() -> {
                         this.update = null;
