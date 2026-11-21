@@ -1995,6 +1995,8 @@ public final class MainActivity extends Activity {
         LinearLayout.LayoutParams row = new LinearLayout.LayoutParams(-1, -2);
         row.bottomMargin = dp(10.0f);
         this.content.addView(sections, row);
+        // Истории — сразу под вкладками, над карточкой профиля.
+        showStories(this.content);
         showMyWall(this.content);
         for (int i = 0; i < PROFILE_SECTIONS.length; i++) {
             final int section = i;
@@ -2023,8 +2025,7 @@ public final class MainActivity extends Activity {
         } else if (this.feedSection == PROFILE_RECS) {
             showRecommendations();
         } else {
-            // Лента: истории, поле новой записи и записи — свои и тех, на кого вы подписаны.
-            showStories(this.content);
+            // Лента: поле новой записи и записи — свои и тех, на кого вы подписаны.
             if (online) {
                 showPostComposer();
                 showServerFeed();
