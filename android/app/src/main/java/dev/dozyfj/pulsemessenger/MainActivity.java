@@ -224,7 +224,7 @@ public final class MainActivity extends Activity {
     private static final int ALBUM_PICKER = 47;
     private static final String[] SETTINGS_TABS = {"Приложение", "Аккаунт", "Сервер"};
     private static final String[] SETTINGS_ICONS = {"⚙", "♙", "▤"};
-    private int page = 0;
+    private int page = 6;
     private int chatFilter = 0;
     private int settingsTab = 0;
     private final TextView[] clipsChoices = new TextView[2];
@@ -318,7 +318,7 @@ public final class MainActivity extends Activity {
             if (this.feedSection < 0 || this.feedSection >= PROFILE_SECTIONS.length || this.feedSection == PROFILE_CHATS) {
                 this.feedSection = PROFILE_FEED;
             }
-            this.page = bundle.getInt("page", 0);
+            this.page = bundle.getInt("page", this.page);
             this.sectionArchive = bundle.getBoolean("sectionArchive");
             int i = bundle.getInt("callFilter");
             if (i >= 0 && i < this.callFilterChoices.length) {

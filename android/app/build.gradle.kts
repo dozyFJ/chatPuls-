@@ -11,8 +11,8 @@ android {
         applicationId = "dev.dozyfj.pulsemessenger"
         minSdk = 26
         targetSdk = 35
-        versionCode = 113
-        versionName = "0.3.10"
+        versionCode = 114
+        versionName = "0.3.11"
     }
     if (releaseSigning.all { !it.isNullOrBlank() }) {
         signingConfigs.create("pulseRelease") {
