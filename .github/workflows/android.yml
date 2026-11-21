@@ -80,32 +80,35 @@ jobs:
             gh release create "$TAG" out/*.apk --target "$GITHUB_SHA" --title "Pulse Messenger ${{ steps.apk.outputs.version }}" --notes "Сборка ${{ steps.signing.outputs.dir }} из коммита $GITHUB_SHA"
           fi
 
-      - name: Опубликовать OTA-обновление
+      - name: Опубликовать OTA-обновления
         run: |
           git fetch --depth 1 origin updates:refs/remotes/origin/updates
-          PUBLISHED=$(git show origin/updates:latest.json | sed -n 's/.*"versionCode": *\([0-9]*\).*/\1/p')
-          if [ "${{ steps.apk.outputs.code }}" -le "${PUBLISHED:-0}" ]; then
-            echo "Версия ${{ steps.apk.outputs.code }} не новее опубликованной $PUBLISHED — OTA пропущено"
-            exit 0
-          fi
-          VERSION=${{ steps.apk.outputs.version }}
-          CODE=${{ steps.apk.outputs.code }}
-          APK="PulseMessenger-$VERSION.apk"
           git worktree add ../updates origin/updates
           cd ../updates
           git checkout -B updates
-          mkdir -p releases && cp "$GITHUB_WORKSPACE/out/$APK" releases/
-          SHA=$(sha256sum "releases/$APK" | cut -d' ' -f1)
-          cat > latest.json <<JSON
-          {
-            "versionCode": $CODE,
-            "versionName": "$VERSION",
-            "url": "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/updates/releases/$APK",
-            "sha256": "$SHA"
+          mkdir -p releases
+          changed=""
+          # $1 — файл манифеста, $2 — имя APK в out/, $3 — versionCode, $4 — versionName
+          publish() {
+            PUBLISHED=$(git show "origin/updates:$1" 2>/dev/null | sed -n 's/.*"versionCode": *\([0-9]*\).*/\1/p')
+            if [ "$3" -le "${PUBLISHED:-0}" ]; then
+              echo "$1: версия $3 не новее опубликованной $PUBLISHED — пропускаю"
+              return
+            fi
+            cp "$GITHUB_WORKSPACE/out/$2" releases/
+            SHA=$(sha256sum "releases/$2" | cut -d' ' -f1)
+            printf '{\n  "versionCode": %s,\n  "versionName": "%s",\n  "url": "https://raw.githubusercontent.com/%s/updates/releases/%s",\n  "sha256": "%s"\n}\n' "$3" "$4" "$GITHUB_REPOSITORY" "$2" "$SHA" > "$1"
+            git add "releases/$2" "$1"
+            changed="$changed $2"
           }
-          JSON
+          publish latest.json "PulseMessenger-${{ steps.apk.outputs.version }}.apk" "${{ steps.apk.outputs.code }}" "${{ steps.apk.outputs.version }}"
+          ADMIN_CODE=$(sed -n 's/.*versionCode = \([0-9]*\).*/\1/p' "$GITHUB_WORKSPACE/android/admin/build.gradle.kts")
+          ADMIN_VERSION=$(sed -n 's/.*versionName = "\(.*\)".*/\1/p' "$GITHUB_WORKSPACE/android/admin/build.gradle.kts")
+          publish admin-latest.json "chatPuls-Admin-$ADMIN_VERSION.apk" "$ADMIN_CODE" "$ADMIN_VERSION"
+          if [ -z "$changed" ]; then
+            exit 0
+          fi
           git config user.name "github-actions[bot]"
           git config user.email "41898699+github-actions[bot]@users.noreply.github.com"
-          git add releases latest.json
-          git commit -m "Publish Pulse Messenger $VERSION OTA update"
+          git commit -m "Publish OTA:$changed"
           git push origin updates

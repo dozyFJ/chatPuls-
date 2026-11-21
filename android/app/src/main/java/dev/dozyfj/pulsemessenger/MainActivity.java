@@ -172,6 +172,10 @@ public final class MainActivity extends Activity {
     private PhoneHost phoneHost;
     private String photoProfileKey;
     private String photoField = "photo";
+    private FrameLayout body;
+    private LinearLayout stickyProfile;
+    private View profileTabsAnchor;
+    private boolean keepProfileTabs;
     private File playingFile;
     private SharedPreferences preferences;
     private TextView pullRefreshHint;
@@ -681,6 +685,7 @@ public final class MainActivity extends Activity {
         headingRow.addView(this.headerAction, new LinearLayout.LayoutParams(dp(38.0f), dp(40.0f)));
         buildCallFilters(column);
         FrameLayout body = new FrameLayout(this);
+        this.body = body;
         column.addView(body, new LinearLayout.LayoutParams(-1, 0, 1.0f));
         this.scroll = new ScrollView(this);
         this.scroll.setFillViewport(true);
@@ -714,7 +719,10 @@ public final class MainActivity extends Activity {
         arrowGroupParams.leftMargin = dp(18.0f);
         arrowGroupParams.bottomMargin = dp(18.0f);
         body.addView(this.scrollActions, arrowGroupParams);
-        this.scroll.setOnScrollChangeListener((view, x, y, oldX, oldY) -> refreshScrollControls());
+        this.scroll.setOnScrollChangeListener((view, x, y, oldX, oldY) -> {
+            refreshScrollControls();
+            updateStickyProfile();
+        });
         this.scroll.addOnLayoutChangeListener((view, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom) -> refreshScrollControls());
         this.createButton = floatingButton("", "");
         this.createButton.setOnClickListener(v -> newChat());
@@ -995,6 +1003,7 @@ public final class MainActivity extends Activity {
     }
 
     private void render() {
+        removeStickyProfile();
         finishVoiceRecording(false);
         this.voiceButton = null;
         this.revealedChat = null;
@@ -1067,7 +1076,13 @@ public final class MainActivity extends Activity {
         } else {
             showChats();
         }
-        this.scroll.scrollTo(0, 0);
+        if (this.keepProfileTabs && this.profileTabsAnchor != null) {
+            // Вкладку переключили из закреплённой панели — остаёмся у вкладок, а не прыгаем к шапке.
+            this.scroll.post(() -> this.scroll.scrollTo(0, profileTabsTop()));
+        } else {
+            this.scroll.scrollTo(0, 0);
+        }
+        this.keepProfileTabs = false;
         refreshScrollControls();
         this.content.animate().cancel();
         this.content.setAlpha(0.85f);
@@ -1907,6 +1922,8 @@ public final class MainActivity extends Activity {
                 params.setMarginStart(dp(6.0f));
             }
         }
+        this.profileTabsAnchor = sections;
+        buildStickyProfile();
         if (this.feedSection == PROFILE_WALL) {
             showWallPosts(true);
         } else if (this.feedSection == PROFILE_ALBUM) {
@@ -1914,6 +1931,98 @@ public final class MainActivity extends Activity {
         } else {
             showStories(this.content);
             showWallPosts(false);
+        }
+    }
+
+    // ---- Закреплённая панель профиля: при прокрутке вниз шапка уходит, а вкладки остаются сверху ----
+
+    private void buildStickyProfile() {
+        removeStickyProfile();
+        LinearLayout bar = new LinearLayout(this);
+        bar.setGravity(Gravity.CENTER_VERTICAL);
+        bar.setPadding(dp(10.0f), dp(8.0f), dp(10.0f), dp(8.0f));
+        bar.setBackground(surface(this.dark ? 0xF2222426 : 0xF7F7F8FA, 20, surfaceOutline()));
+        bar.setElevation(dp(4.0f));
+        bar.setClickable(true);
+        FrameLayout avatar = outlinedAvatar();
+        showProfilePhoto(avatar, wallProfileKey(), "♙", 12, ink());
+        avatar.setOnClickListener(v -> this.scroll.smoothScrollTo(0, 0));
+        avatar.setContentDescription("Наверх к профилю");
+        LinearLayout.LayoutParams avatarParams = new LinearLayout.LayoutParams(dp(32.0f), dp(32.0f));
+        avatarParams.setMarginEnd(dp(8.0f));
+        bar.addView(avatar, avatarParams);
+        for (int i = 0; i < PROFILE_SECTIONS.length; i++) {
+            final int section = i;
+            boolean selected = this.feedSection == section;
+            TextView choice = text(PROFILE_SECTIONS[i], 13, selected ? onAccent() : ink(), true);
+            choice.setGravity(Gravity.CENTER);
+            choice.setSingleLine(true);
+            choice.setBackground(selected ? accentPill(18) : surface(0, 18, surfaceOutline()));
+            choice.setFocusable(true);
+            choice.setOnClickListener(v -> {
+                if (this.feedSection == section) {
+                    return;
+                }
+                this.feedSection = section;
+                this.keepProfileTabs = true;
+                render();
+            });
+            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, dp(38.0f), 1.0f);
+            if (i > 0) {
+                params.setMarginStart(dp(6.0f));
+            }
+            bar.addView(choice, params);
+        }
+        FrameLayout.LayoutParams barParams = new FrameLayout.LayoutParams(-1, -2, Gravity.TOP);
+        barParams.setMargins(dp(10.0f), dp(6.0f), dp(10.0f), 0);
+        bar.setVisibility(View.GONE);
+        this.body.addView(bar, barParams);
+        this.stickyProfile = bar;
+        this.scroll.post(this::updateStickyProfile);
+    }
+
+    private void removeStickyProfile() {
+        if (this.stickyProfile != null && this.body != null) {
+            this.stickyProfile.animate().cancel();
+            this.body.removeView(this.stickyProfile);
+        }
+        this.stickyProfile = null;
+        this.profileTabsAnchor = null;
+    }
+
+    /** Положение вкладок профиля внутри прокручиваемого содержимого. */
+    private int profileTabsTop() {
+        int top = 0;
+        View view = this.profileTabsAnchor;
+        while (view != null && view != this.content) {
+            top += view.getTop();
+            view = view.getParent() instanceof View ? (View) view.getParent() : null;
+        }
+        return Math.max(0, top - dp(6.0f));
+    }
+
+    private void updateStickyProfile() {
+        if (this.stickyProfile == null || this.profileTabsAnchor == null) {
+            return;
+        }
+        boolean show = this.scroll.getScrollY() > profileTabsTop() + this.profileTabsAnchor.getHeight() / 2;
+        boolean shown = this.stickyProfile.getVisibility() == View.VISIBLE;
+        if (show == shown) {
+            return;
+        }
+        this.stickyProfile.animate().cancel();
+        if (show) {
+            this.stickyProfile.setVisibility(View.VISIBLE);
+            this.stickyProfile.setAlpha(0.0f);
+            this.stickyProfile.setTranslationY(-dp(12.0f));
+            this.stickyProfile.animate().alpha(1.0f).translationY(0.0f).setDuration(140L).start();
+        } else {
+            this.stickyProfile.animate().alpha(0.0f).translationY(-dp(12.0f)).setDuration(120L)
+                    .withEndAction(() -> {
+                        if (this.stickyProfile != null) {
+                            this.stickyProfile.setVisibility(View.GONE);
+                        }
+                    }).start();
         }
     }
 

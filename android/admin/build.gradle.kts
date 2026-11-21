@@ -11,8 +11,8 @@ android {
         applicationId = "dev.dozyfj.chatpuls.admin"
         minSdk = 26
         targetSdk = 35
-        versionCode = 2
-        versionName = "1.1.0"
+        versionCode = 3
+        versionName = "1.2.0"
     }
     if (releaseSigning.all { !it.isNullOrBlank() }) {
         signingConfigs.create("pulseRelease") {
@@ -33,4 +33,5 @@ android {
     }
 }
 dependencies {
+    implementation("androidx.core:core:1.16.0")
 }

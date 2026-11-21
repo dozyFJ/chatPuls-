@@ -53,11 +53,15 @@ public final class AdminActivity extends Activity {
     private LinearLayout tabRow;
     private TextView subtitle;
     private Runnable pendingSearch;
+    private UpdateManager updates;
+    private boolean awaitingInstallPermission;
+    private final UpdateManager.Listener updateListener = this::onUpdateChanged;
 
     @Override
     protected void onCreate(Bundle state) {
         super.onCreate(state);
         this.preferences = getSharedPreferences("admin", MODE_PRIVATE);
+        this.updates = UpdateManager.get(this);
         this.dark = (getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES;
         if (state != null) {
             this.tab = state.getInt("tab", OVERVIEW);
@@ -89,6 +93,85 @@ public final class AdminActivity extends Activity {
         state.putBoolean("allReports", this.allReports);
         state.putString("userQuery", this.userQuery);
         super.onSaveInstanceState(state);
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        this.updates.bind(this.updateListener);
+        this.updates.checkIfNeeded();
+    }
+
+    @Override
+    protected void onPause() {
+        this.updates.unbind(this.updateListener);
+        super.onPause();
+    }
+
+    // ---- Обновления (OTA из ветки updates, admin-latest.json) ----
+
+    private void onUpdateChanged() {
+        if (this.updates.takeOffer() && !isDestroyed()) {
+            new AlertDialog.Builder(this).setTitle("Обновление chatPuls Admin")
+                    .setMessage("Версия " + this.updates.update().name() + " скачана и проверена. Установить?")
+                    .setNegativeButton("Позже", null)
+                    .setPositiveButton("Установить", (dialog, which) -> requestInstall()).show();
+        }
+    }
+
+    private void checkUpdates() {
+        if (this.updates.phase() == UpdateManager.Phase.READY) {
+            requestInstall();
+            return;
+        }
+        toast("Проверяем обновления…");
+        this.updates.check();
+        this.handler.postDelayed(() -> {
+            if (!isDestroyed() && this.updates.phase() == UpdateManager.Phase.CURRENT) {
+                toast("Установлена последняя версия");
+            }
+        }, 4000L);
+    }
+
+    private void requestInstall() {
+        if (!getPackageManager().canRequestPackageInstalls()) {
+            try {
+                this.awaitingInstallPermission = true;
+                startActivityForResult(new Intent(android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, android.net.Uri.parse("package:" + getPackageName())), 41);
+            } catch (android.content.ActivityNotFoundException | SecurityException e) {
+                this.awaitingInstallPermission = false;
+                toast("Не удалось открыть настройки установки");
+            }
+            return;
+        }
+        this.updates.verify(this::openInstaller, () -> {
+            if (!isDestroyed()) {
+                toast("Не удалось проверить обновление");
+            }
+        });
+    }
+
+    private void openInstaller(java.io.File file) {
+        if (isDestroyed() || isFinishing()) {
+            return;
+        }
+        try {
+            android.net.Uri uri = androidx.core.content.FileProvider.getUriForFile(this, getPackageName() + ".updates", file);
+            startActivity(new Intent(Intent.ACTION_VIEW).setDataAndType(uri, "application/vnd.android.package-archive").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION));
+        } catch (android.content.ActivityNotFoundException | IllegalArgumentException | SecurityException e) {
+            toast("Не удалось открыть установщик");
+        }
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == 41 && this.awaitingInstallPermission) {
+            this.awaitingInstallPermission = false;
+            if (getPackageManager().canRequestPackageInstalls()) {
+                requestInstall();
+            }
+        }
     }
 
     @Override
@@ -409,12 +492,20 @@ public final class AdminActivity extends Activity {
         refresh.setOnClickListener(v -> render());
         header.addView(refresh, new LinearLayout.LayoutParams(dp(44.0f), dp(44.0f)));
         TextView menu = headerAction("⋯", "Меню");
-        menu.setOnClickListener(v -> new AlertDialog.Builder(this).setItems(new String[]{"Сменить сервер", "Выйти"}, (dialog, which) -> {
-            if (which == 1) {
-                signOut();
-            }
-            showLogin(null);
-        }).show());
+        menu.setOnClickListener(v -> {
+            boolean ready = this.updates.phase() == UpdateManager.Phase.READY;
+            String updateLabel = ready ? "Установить версию " + this.updates.update().name() : "Проверить обновления";
+            new AlertDialog.Builder(this).setItems(new String[]{updateLabel, "Сменить сервер", "Выйти"}, (dialog, which) -> {
+                if (which == 0) {
+                    checkUpdates();
+                    return;
+                }
+                if (which == 2) {
+                    signOut();
+                }
+                showLogin(null);
+            }).show();
+        });
         header.addView(menu, new LinearLayout.LayoutParams(dp(44.0f), dp(44.0f)));
         this.tabRow = new LinearLayout(this);
         this.tabRow.setPadding(dp(14.0f), dp(4.0f), dp(14.0f), dp(8.0f));
