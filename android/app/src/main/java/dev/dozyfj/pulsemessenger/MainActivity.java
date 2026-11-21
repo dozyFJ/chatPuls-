@@ -39,7 +39,6 @@ import android.text.format.DateFormat;
 import android.text.format.DateUtils;
 import android.util.Base64;
 import android.util.Patterns;
-import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
@@ -54,6 +53,7 @@ import android.widget.FrameLayout;
 import android.widget.HorizontalScrollView;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.PopupMenu;
 import android.widget.ScrollView;
 import android.widget.Switch;
 import android.widget.TextView;
@@ -141,7 +141,6 @@ public final class MainActivity extends Activity {
     private Button callsShortcut;
     private HorizontalScrollView profileTabStrip;
     private boolean dark;
-    private LinearLayout dock;
     private TextView drawerClose;
     private TextView drawerTitle;
     private TextView eventsChoice;
@@ -184,7 +183,7 @@ public final class MainActivity extends Activity {
     private TextView pullRefreshHint;
     private boolean pullingRefresh;
     private View pulseBrand;
-    private TextView feedShortcut;
+    private TextView mainMenuButton;
     private File recordingFile;
     private String requestedVoicePeer;
     private boolean resumed;
@@ -659,16 +658,12 @@ public final class MainActivity extends Activity {
         headerLine.addView(this.pulseBrand, new FrameLayout.LayoutParams(-2, dp(40.0f), Gravity.CENTER));
         this.headerBack = headerControl("‹");
         headingRow.addView(this.headerBack, new LinearLayout.LayoutParams(dp(40.0f), dp(40.0f)));
-        this.feedShortcut = text("Фид", 14, headerInk(), true);
-        this.feedShortcut.setGravity(Gravity.CENTER);
-        this.feedShortcut.setFocusable(true);
-        this.feedShortcut.setOnClickListener(v -> {
-            this.openProfile = null;
-            this.friendsOpen = false;
-            this.feedSection = PROFILE_FEED;
-            openDockPage(6);
-        });
-        headingRow.addView(this.feedShortcut, new LinearLayout.LayoutParams(dp(74.0f), dp(44.0f)));
+        this.mainMenuButton = text("Главная", 14, headerInk(), true);
+        this.mainMenuButton.setGravity(Gravity.CENTER);
+        this.mainMenuButton.setFocusable(true);
+        this.mainMenuButton.setBackground(glass(22));
+        this.mainMenuButton.setOnClickListener(this::showMainMenu);
+        headingRow.addView(this.mainMenuButton, new LinearLayout.LayoutParams(dp(80.0f), dp(44.0f)));
         this.settingsTabs = buildSettingsTabs(headingRow);
         buildClipsTabs(headingRow);
         LinearLayout heading = column();
@@ -800,12 +795,6 @@ public final class MainActivity extends Activity {
         body.addView(this.pullRefreshHint, new FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL));
         this.compose = column();
         column.addView(this.compose, new LinearLayout.LayoutParams(-1, -2));
-        this.dock = new LinearLayout(this);
-        this.dock.setGravity(Gravity.CENTER_VERTICAL);
-        this.dock.setPadding(dp(4.0f), dp(3.0f), dp(4.0f), dp(3.0f));
-        int dockColor = this.dark ? 0xA022262B : 0xA0F1F5F9;
-        this.dock.setBackground(barSurface(dockColor, 48));
-        column.addView(this.dock, new LinearLayout.LayoutParams(-1, -2));
         buildFeedDrawer(frameLayout, background);
     }
 
@@ -853,13 +842,12 @@ public final class MainActivity extends Activity {
                 boolean onSettingsHeaderTabs = containsTouch(this.settingsTabs, event);
                 boolean onClipsHeaderTabs = containsTouch(this.clipsTabs, event);
                 boolean onHeaderTabs = onSettingsHeaderTabs || onClipsHeaderTabs;
-                boolean onDock = containsTouch(this.dock, event);
                 this.tabSwipeDistance = dp(onHeaderTabs ? 24.0f : 40.0f);
                 this.mainBodySwipe = isMainPage() && containsTouch(this.scroll, event);
                 if (this.feedOpen) {
                     this.watchDrawerSwipe = containsTouch(this.feedHeader, event);
                 } else {
-                    this.watchDrawerSwipe = this.swipeX <= dp(28.0f) && !onHeaderTabs && !onDock
+                    this.watchDrawerSwipe = this.swipeX <= dp(28.0f) && !onHeaderTabs
                             && !containsTouch(this.headerBack, event);
                 }
                 this.watchTabSwipe = !this.feedOpen && !this.watchDrawerSwipe && this.peer == null
@@ -1020,48 +1008,29 @@ public final class MainActivity extends Activity {
         return true;
     }
 
-    private void addDock(int iconResource, Bitmap avatar, String label, boolean selected, final Runnable click) {
-        LinearLayout item = column();
-        item.setGravity(Gravity.CENTER);
-        item.setPadding(dp(2.0f), dp(2.0f), dp(2.0f), dp(2.0f));
-        item.setMinimumHeight(dp(54.0f));
-        item.setClickable(true);
-        item.setFocusable(true);
-        item.setContentDescription(label);
-        item.setSelected(selected);
-        int iconColor = selected ? onAccent() : ink();
-        int circleColor = selected ? accent() : this.dark ? 0xFF363E47 : 0xFFE1E8EF;
-        GradientDrawable circle = new GradientDrawable();
-        circle.setShape(1);
-        circle.setColor(circleColor);
-        FrameLayout icon = new FrameLayout(this);
-        icon.setBackground(circle);
-        icon.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);
-        if (avatar == null) {
-            ImageView glyph = new ImageView(this);
-            glyph.setImageResource(iconResource);
-            glyph.setImageTintList(ColorStateList.valueOf(iconColor));
-            icon.addView(glyph, new FrameLayout.LayoutParams(dp(21.0f), dp(21.0f), Gravity.CENTER));
-        } else {
-            ImageView photo = new ImageView(this);
-            photo.setImageBitmap(avatar);
-            photo.setScaleType(ImageView.ScaleType.CENTER_CROP);
-            GradientDrawable photoCircle = new GradientDrawable();
-            photoCircle.setShape(GradientDrawable.OVAL);
-            photoCircle.setColor(circleColor);
-            photo.setBackground(photoCircle);
-            photo.setClipToOutline(true);
-            icon.addView(photo, new FrameLayout.LayoutParams(dp(30.0f), dp(30.0f), Gravity.CENTER));
-        }
-        TextView name = text(label, 11, selected ? accent() : muted(), selected);
-        name.setSingleLine(true);
-        name.setGravity(Gravity.CENTER);
-        name.setAutoSizeTextTypeUniformWithConfiguration(8, 11, 1, TypedValue.COMPLEX_UNIT_SP);
-        name.setImportantForAccessibility(2);
-        item.addView(icon, new LinearLayout.LayoutParams(dp(34.0f), dp(34.0f)));
-        item.addView(name, new LinearLayout.LayoutParams(-1, dp(16.0f)));
-        item.setOnClickListener(view -> click.run());
-        this.dock.addView(item, new LinearLayout.LayoutParams(0, -2, 1.0f));
+    private void showMainMenu(View anchor) {
+        PopupMenu menu = new PopupMenu(this, anchor);
+        addMainMenuItem(menu, "Профиль", () -> {
+            this.openProfile = null;
+            this.friendsOpen = false;
+            this.feedSection = PROFILE_FEED;
+            openPage(6);
+        });
+        addMainMenuItem(menu, "Настройки", () -> openPage(2));
+        addMainMenuItem(menu, "Чаты", this::showMainMessages);
+        addMainMenuItem(menu, "Каналы", () -> selectAllChatsTab(2));
+        addMainMenuItem(menu, "Сообщества", () -> selectAllChatsTab(3));
+        addMainMenuItem(menu, "Контакты", () -> selectAllChatsTab(4));
+        addMainMenuItem(menu, "Звонки", () -> selectAllChatsTab(6));
+        addMainMenuItem(menu, "Клипы", () -> openPage(5));
+        menu.show();
+    }
+
+    private void addMainMenuItem(PopupMenu menu, String title, Runnable action) {
+        menu.getMenu().add(title).setOnMenuItemClickListener(item -> {
+            action.run();
+            return true;
+        });
     }
 
     private void render() {
@@ -1080,7 +1049,6 @@ public final class MainActivity extends Activity {
         this.revealedChat = null;
         this.content.removeAllViews();
         this.compose.removeAllViews();
-        this.dock.removeAllViews();
         this.list = null;
         this.messageInput = null;
         this.updateText = null;
@@ -1116,17 +1084,6 @@ public final class MainActivity extends Activity {
         this.alphabetRail.setVisibility(View.GONE);
         int reservedBottom = showCallsShortcut ? 148 : showFab ? 86 : 12;
         this.content.setPadding(dp(16.0f), dp(12.0f), dp(16.0f), dp(reservedBottom));
-        this.dock.setVisibility(this.peer == null ? View.VISIBLE : View.GONE);
-        addDock(R.drawable.ic_feed_profile, loadProfilePhoto(wallProfileKey()), "Профиль", this.page == 6 || isChatsPage(), () -> {
-            this.openProfile = null;
-            this.friendsOpen = false;
-            openDockPage(6);
-        });
-        addDock(android.R.drawable.ic_menu_preferences, null, "Настройки", this.page == 2, () -> openDockPage(2));
-        int activeTab = isMainPage() ? activeChatsTab() : -1;
-        addDock(R.drawable.ic_feed_channels, null, "Каналы", activeTab == 2, () -> selectAllChatsTab(2));
-        addDock(R.drawable.ic_community_rail, null, "Сообщества", activeTab == 3, () -> selectAllChatsTab(3));
-        addDock(R.drawable.ic_feed_profile, null, "Контакты", activeTab == 4, () -> selectAllChatsTab(4));
         if (this.searchMode && this.peer == null) {
             showSearchResults();
         } else if (this.peer != null) {
@@ -1254,7 +1211,7 @@ public final class MainActivity extends Activity {
         render();
     }
 
-    private void openDockPage(int page) {
+    private void openPage(int page) {
         this.page = page;
         this.peer = null;
         this.sectionArchive = false;
@@ -1340,7 +1297,7 @@ public final class MainActivity extends Activity {
             }
         } else if (this.page != 6 || this.feedSection != section) {
             this.feedSection = section;
-            openDockPage(6);
+            openPage(6);
         }
     }
 
@@ -4334,7 +4291,7 @@ public final class MainActivity extends Activity {
     private void showAppSettings() {
         LinearLayout card = newCard();
         Button clips = button("Клипы", false);
-        clips.setOnClickListener(v -> openDockPage(5));
+        clips.setOnClickListener(v -> openPage(5));
         card.addView(clips);
         Switch theme = new Switch(this);
         theme.setText("Тёмная тема");
@@ -4979,12 +4936,7 @@ public final class MainActivity extends Activity {
             return;
         }
         boolean chatHeader = this.peer == null && isMainPage();
-        this.feedShortcut.setVisibility(chatHeader && !this.searchMode ? View.VISIBLE : View.GONE);
-        boolean onWall = this.page == 6 && this.feedSection == PROFILE_FEED
-                && this.openProfile == null && !this.friendsOpen;
-        this.feedShortcut.setSelected(onWall);
-        this.feedShortcut.setTextColor(onWall ? onHeaderAccent() : headerInk());
-        this.feedShortcut.setBackground(onWall ? headerAccentPill() : glass(22));
+        this.mainMenuButton.setVisibility(this.peer == null && !this.searchMode ? View.VISIBLE : View.GONE);
         this.headerTitle.setVisibility(this.peer != null ? View.VISIBLE : View.GONE);
         this.notificationsButton.setVisibility(chatHeader ? View.VISIBLE : View.GONE);
         this.searchButton.setVisibility(chatHeader ? View.VISIBLE : View.GONE);
