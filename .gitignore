@@ -4,3 +4,4 @@ server/data.json
 server/data.json.tmp
 *.jks
 *.keystore
+!android/signing/pulse-release.jks
