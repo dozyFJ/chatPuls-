@@ -17,6 +17,7 @@ import android.graphics.Rect;
 import android.graphics.Typeface;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
+import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.LayerDrawable;
 import android.graphics.drawable.RippleDrawable;
@@ -1603,6 +1604,7 @@ public final class MainActivity extends Activity {
         this.notificationTabs.setVisibility(this.notificationDrawer ? 0 : 8);
         this.feedContent.removeAllViews();
         if (!this.notificationDrawer) {
+            showStories(this.feedContent);
             showMyWall(this.feedContent);
             return;
         }
@@ -1623,6 +1625,202 @@ public final class MainActivity extends Activity {
             return;
         }
         renderFeedDrawer();
+    }
+
+    // ---- Истории (кружки в стиле Instagram/Telegram под шапкой ленты) ----
+
+    private static final int STORY_PICKER = 45;
+    private static final long STORY_LIFETIME = 24L * 60 * 60 * 1000;
+    private static final int[] STORY_RING = {0xFFFEDA75, 0xFFFA7E1E, 0xFFD62976, 0xFF962FBF, 0xFF4F5BD5, 0xFFFEDA75};
+
+    private String storyKey() {
+        return "story." + owner() + ".";
+    }
+
+    private boolean hasStory() {
+        long time = this.preferences.getLong(storyKey() + "time", 0L);
+        return !this.preferences.getString(storyKey() + "uri", "").isEmpty() && System.currentTimeMillis() - time < STORY_LIFETIME;
+    }
+
+    private void showStories(LinearLayout parent) {
+        HorizontalScrollView scroller = new HorizontalScrollView(this);
+        scroller.setHorizontalScrollBarEnabled(false);
+        scroller.setFillViewport(true);
+        LinearLayout row = new LinearLayout(this);
+        row.setGravity(Gravity.CENTER_HORIZONTAL);
+        row.setPadding(0, dp(2.0f), 0, dp(2.0f));
+        scroller.addView(row, new FrameLayout.LayoutParams(-1, -2));
+        LinearLayout.LayoutParams scrollerParams = new LinearLayout.LayoutParams(-1, -2);
+        scrollerParams.bottomMargin = dp(12.0f);
+        parent.addView(scroller, scrollerParams);
+
+        boolean mine = hasStory();
+        FrameLayout myPhoto = outlinedAvatar();
+        showProfilePhoto(myPhoto, wallProfileKey(), "♙", 22, ink());
+        View me = storyBubble(myPhoto, "Вы", mine, !mine);
+        me.setContentDescription(mine ? "Моя история" : "Добавить историю");
+        me.setOnClickListener(v -> {
+            if (hasStory()) {
+                openStory();
+            } else {
+                pickStory();
+            }
+        });
+        me.setOnLongClickListener(v -> {
+            storyActions();
+            return true;
+        });
+        row.addView(me);
+
+        List<String> peers = this.store.chats(owner());
+        for (int i = 0; i < peers.size() && i < 30; i++) {
+            final String name = peers.get(i);
+            View bubble = storyBubble(chatAvatar(name), name, false, false);
+            bubble.setContentDescription("Открыть чат " + name);
+            bubble.setOnClickListener(v -> {
+                hideFeedDrawer();
+                this.peer = name;
+                this.page = 0;
+                render();
+            });
+            row.addView(bubble);
+        }
+    }
+
+    private View storyBubble(View avatar, String label, boolean active, boolean addBadge) {
+        LinearLayout item = column();
+        item.setGravity(Gravity.CENTER_HORIZONTAL);
+        item.setPadding(dp(5.0f), 0, dp(5.0f), 0);
+        item.setFocusable(true);
+        item.setClickable(true);
+        FrameLayout holder = new FrameLayout(this);
+        FrameLayout ring = new FrameLayout(this);
+        GradientDrawable ringShape;
+        if (active) {
+            ringShape = new GradientDrawable();
+            ringShape.setGradientType(GradientDrawable.SWEEP_GRADIENT);
+            ringShape.setColors(STORY_RING);
+        } else {
+            ringShape = new GradientDrawable();
+            ringShape.setColor(0);
+            ringShape.setStroke(dp(1.5f), surfaceOutline());
+        }
+        ringShape.setShape(GradientDrawable.OVAL);
+        ring.setBackground(ringShape);
+        int gap = dp(active ? 2.5f : 3.0f);
+        ring.setPadding(gap, gap, gap, gap);
+        FrameLayout inner = new FrameLayout(this);
+        GradientDrawable innerShape = new GradientDrawable();
+        innerShape.setShape(GradientDrawable.OVAL);
+        innerShape.setColor(this.dark ? 0xFF191A1C : 0xFFF4F4F4);
+        inner.setBackground(innerShape);
+        int innerGap = dp(active ? 2.5f : 0.0f);
+        inner.setPadding(innerGap, innerGap, innerGap, innerGap);
+        avatar.setClipToOutline(true);
+        GradientDrawable avatarShape = new GradientDrawable();
+        avatarShape.setShape(GradientDrawable.OVAL);
+        avatarShape.setColor(this.dark ? 0xFF2A2C2F : 0xFFE6EAED);
+        avatar.setBackground(avatarShape);
+        inner.addView(avatar, new FrameLayout.LayoutParams(-1, -1));
+        ring.addView(inner, new FrameLayout.LayoutParams(-1, -1));
+        holder.addView(ring, new FrameLayout.LayoutParams(dp(64.0f), dp(64.0f)));
+        if (addBadge) {
+            TextView plus = text("+", 14, onAccent(), true);
+            plus.setGravity(Gravity.CENTER);
+            plus.setIncludeFontPadding(false);
+            GradientDrawable badge = accentPill(11);
+            badge.setStroke(dp(2.0f), this.dark ? 0xFF191A1C : 0xFFF4F4F4);
+            plus.setBackground(badge);
+            holder.addView(plus, new FrameLayout.LayoutParams(dp(22.0f), dp(22.0f), Gravity.END | Gravity.BOTTOM));
+        }
+        item.addView(holder, new LinearLayout.LayoutParams(dp(64.0f), dp(64.0f)));
+        TextView name = text(label, 11, active ? ink() : muted(), active);
+        name.setSingleLine(true);
+        name.setEllipsize(TextUtils.TruncateAt.END);
+        name.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams nameParams = new LinearLayout.LayoutParams(dp(68.0f), -2);
+        nameParams.topMargin = dp(4.0f);
+        item.addView(name, nameParams);
+        return item;
+    }
+
+    private void pickStory() {
+        Intent picker = new Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("image/*");
+        try {
+            startActivityForResult(picker, STORY_PICKER);
+        } catch (ActivityNotFoundException e) {
+            Toast.makeText(this, "Выбор фото недоступен", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void saveStory(Uri uri) {
+        try {
+            getContentResolver().takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        } catch (SecurityException ignored) {
+        }
+        this.preferences.edit().putString(storyKey() + "uri", uri.toString()).putLong(storyKey() + "time", System.currentTimeMillis()).apply();
+        Toast.makeText(this, "История опубликована на 24 часа", Toast.LENGTH_SHORT).show();
+        if (this.feedOpen && !this.notificationDrawer) {
+            renderFeedDrawer();
+        }
+    }
+
+    private void storyActions() {
+        boolean mine = hasStory();
+        String[] items = mine ? new String[]{"Смотреть", "Новая история", "Удалить историю"} : new String[]{"Добавить историю"};
+        showDialog(new AlertDialog.Builder(this).setTitle("Моя история").setItems(items, (dialog, which) -> {
+            if (!mine || which == 1) {
+                pickStory();
+            } else if (which == 0) {
+                openStory();
+            } else {
+                this.preferences.edit().remove(storyKey() + "uri").remove(storyKey() + "time").apply();
+                renderFeedDrawer();
+            }
+        }).setNegativeButton("Отмена", null).create());
+    }
+
+    private void openStory() {
+        Uri uri = Uri.parse(this.preferences.getString(storyKey() + "uri", ""));
+        android.app.Dialog viewer = new android.app.Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen);
+        FrameLayout screen = new FrameLayout(this);
+        screen.setBackgroundColor(Color.BLACK);
+        ImageView picture = new ImageView(this);
+        picture.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        try {
+            picture.setImageURI(uri);
+        } catch (SecurityException e) {
+            Toast.makeText(this, "Нет доступа к фото истории", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (picture.getDrawable() == null) {
+            Toast.makeText(this, "Фото истории недоступно", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        screen.addView(picture, new FrameLayout.LayoutParams(-1, -1));
+        View track = new View(this);
+        track.setBackgroundColor(0x55FFFFFF);
+        FrameLayout.LayoutParams trackParams = new FrameLayout.LayoutParams(-1, dp(3.0f), Gravity.TOP);
+        trackParams.setMargins(dp(10.0f), dp(14.0f), dp(10.0f), 0);
+        screen.addView(track, trackParams);
+        View progress = new View(this);
+        progress.setBackgroundColor(Color.WHITE);
+        progress.setPivotX(0.0f);
+        progress.setScaleX(0.0f);
+        screen.addView(progress, trackParams);
+        long age = System.currentTimeMillis() - this.preferences.getLong(storyKey() + "time", 0L);
+        TextView caption = text("Вы · " + DateUtils.getRelativeTimeSpanString(System.currentTimeMillis() - age, System.currentTimeMillis(), DateUtils.MINUTE_IN_MILLIS), 14, Color.WHITE, true);
+        FrameLayout.LayoutParams captionParams = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.START);
+        captionParams.setMargins(dp(14.0f), dp(26.0f), 0, 0);
+        screen.addView(caption, captionParams);
+        screen.setOnClickListener(v -> viewer.dismiss());
+        viewer.setContentView(screen);
+        viewer.show();
+        progress.animate().scaleX(1.0f).setDuration(5000L).setInterpolator(new android.view.animation.LinearInterpolator()).withEndAction(() -> {
+            if (viewer.isShowing()) {
+                viewer.dismiss();
+            }
+        }).start();
     }
 
     private String wallProfileKey() {
@@ -3298,6 +3496,12 @@ public final class MainActivity extends Activity {
             if (resultCode == -1 && data != null && data.getData() != null && this.page == 1) {
                 showPickedPhoneContact(data.getData());
                 return;
+            }
+            return;
+        }
+        if (requestCode == STORY_PICKER) {
+            if (resultCode == -1 && data != null && data.getData() != null) {
+                saveStory(data.getData());
             }
             return;
         }
