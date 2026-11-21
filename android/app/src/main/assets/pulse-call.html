@@ -1,0 +1,65 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; media-src blob:">
+<audio id="remote" autoplay></audio>
+<script>
+"use strict";
+let connection;
+let microphone;
+const remote = document.getElementById("remote");
+
+async function setup() {
+    connection = new RTCPeerConnection({ iceServers: [] });
+    connection.ontrack = event => {
+        remote.srcObject = event.streams[0];
+        remote.play().catch(() => PulseCall.event("failed"));
+    };
+    connection.onconnectionstatechange = () => {
+        if (connection.connectionState === "connected") PulseCall.event("connected");
+        if (connection.connectionState === "failed") PulseCall.event("failed");
+    };
+    microphone = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    for (const track of microphone.getAudioTracks()) connection.addTrack(track, microphone);
+}
+
+async function gather(description) {
+    await connection.setLocalDescription(description);
+    if (connection.iceGatheringState !== "complete") {
+        await new Promise(resolve => {
+            const complete = () => {
+                connection.removeEventListener("icegatheringstatechange", changed);
+                clearTimeout(timeout);
+                resolve();
+            };
+            const changed = () => { if (connection.iceGatheringState === "complete") complete(); };
+            const timeout = setTimeout(complete, 4500);
+            connection.addEventListener("icegatheringstatechange", changed);
+            changed();
+        });
+    }
+    return connection.localDescription.sdp;
+}
+
+async function begin(offer) {
+    try {
+        await setup();
+        if (offer) await connection.setRemoteDescription({ type: "offer", sdp: offer });
+        const description = offer ? await connection.createAnswer() : await connection.createOffer();
+        PulseCall.description(await gather(description));
+    } catch (_) {
+        PulseCall.event("failed");
+    }
+}
+
+async function acceptAnswer(sdp) {
+    try {
+        await connection.setRemoteDescription({ type: "answer", sdp });
+    } catch (_) {
+        PulseCall.event("failed");
+    }
+}
+
+function mute(muted) {
+    if (microphone) for (const track of microphone.getAudioTracks()) track.enabled = !muted;
+}
+</script>

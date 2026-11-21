@@ -1,0 +1,103 @@
+name: Android APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Опубликовать OTA-обновление в ветку updates"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  server:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm test
+        working-directory: server
+
+  apk:
+    runs-on: ubuntu-latest
+    env:
+      KEYSTORE_BASE64: ${{ secrets.PULSE_KEYSTORE_BASE64 }}
+      KEYSTORE_PASSWORD: ${{ secrets.PULSE_KEYSTORE_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.11.1
+
+      - name: Подготовить ключ подписи
+        id: signing
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ] && [ -n "$KEYSTORE_PASSWORD" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/pulse-release.jks"
+            {
+              echo "PULSE_KEYSTORE=$RUNNER_TEMP/pulse-release.jks"
+              echo "PULSE_STORE_PASSWORD=$KEYSTORE_PASSWORD"
+              echo "PULSE_KEY_ALIAS=pulse"
+              echo "PULSE_KEY_PASSWORD=$KEYSTORE_PASSWORD"
+            } >> "$GITHUB_ENV"
+            echo "task=assembleRelease" >> "$GITHUB_OUTPUT"
+            echo "dir=release" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::Секреты PULSE_KEYSTORE_BASE64 и PULSE_KEYSTORE_PASSWORD не заданы — собираю debug-APK со случайным ключом."
+            echo "task=assembleDebug" >> "$GITHUB_OUTPUT"
+            echo "dir=debug" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Собрать APK
+        run: gradle -p android --no-daemon :app:${{ steps.signing.outputs.task }}
+
+      - name: Назвать APK по версии
+        id: apk
+        run: |
+          VERSION=$(sed -n 's/.*versionName = "\(.*\)".*/\1/p' android/app/build.gradle.kts)
+          CODE=$(sed -n 's/.*versionCode = \([0-9]*\).*/\1/p' android/app/build.gradle.kts)
+          SRC=$(ls android/app/build/outputs/apk/${{ steps.signing.outputs.dir }}/*.apk | head -1)
+          mkdir -p out && cp "$SRC" "out/PulseMessenger-$VERSION.apk"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "code=$CODE" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PulseMessenger-${{ steps.apk.outputs.version }}
+          path: out/*.apk
+
+      - name: Опубликовать OTA-обновление
+        if: ${{ inputs.publish && steps.signing.outputs.dir == 'release' }}
+        run: |
+          VERSION=${{ steps.apk.outputs.version }}
+          CODE=${{ steps.apk.outputs.code }}
+          APK="PulseMessenger-$VERSION.apk"
+          git fetch origin updates
+          git worktree add ../updates origin/updates
+          cd ../updates
+          git checkout -B updates
+          mkdir -p releases && cp "$GITHUB_WORKSPACE/out/$APK" releases/
+          SHA=$(sha256sum "releases/$APK" | cut -d' ' -f1)
+          cat > latest.json <<JSON
+          {
+            "versionCode": $CODE,
+            "versionName": "$VERSION",
+            "url": "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/updates/releases/$APK",
+            "sha256": "$SHA"
+          }
+          JSON
+          git config user.name "github-actions[bot]"
+          git config user.email "41898699+github-actions[bot]@users.noreply.github.com"
+          git add releases latest.json
+          git commit -m "Publish Pulse Messenger $VERSION OTA update"
+          git push origin updates

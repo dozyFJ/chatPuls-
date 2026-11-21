@@ -1,0 +1,6 @@
+.gradle/
+**/build/
+server/data.json
+server/data.json.tmp
+*.jks
+*.keystore

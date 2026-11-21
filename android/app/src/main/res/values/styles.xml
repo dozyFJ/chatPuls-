@@ -1,0 +1,23 @@
+<resources>
+    <style name="PulseTheme" parent="@android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:windowActionModeOverlay">true</item>
+        <item name="android:fontFamily">sans</item>
+        <item name="android:colorAccent">@color/pulse_accent_light</item>
+        <item name="android:statusBarColor">#f4f4f4</item>
+        <item name="android:navigationBarColor">#303030</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:colorBackgroundFloating">#e6eaed</item>
+    </style>
+    <style name="PulseDarkTheme" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:colorAccent">@color/pulse_accent_dark</item>
+        <item name="android:statusBarColor">#191a1c</item>
+        <item name="android:navigationBarColor">#191a1c</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:colorBackgroundFloating">#292b2e</item>
+    </style>
+    <style name="PulseDialogAnimation">
+        <item name="android:windowEnterAnimation">@anim/popup_in</item>
+        <item name="android:windowExitAnimation">@anim/popup_out</item>
+    </style>
+</resources>
