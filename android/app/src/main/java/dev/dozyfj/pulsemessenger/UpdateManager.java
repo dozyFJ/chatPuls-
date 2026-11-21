@@ -17,7 +17,7 @@ final class UpdateManager {
     private Listener listener;
     private boolean offered;
     private UpdateClient.Update update;
-    private final ExecutorService executor = Executors.newSingleThreadExecutor(runnable -> UpdateManager.newStep0(runnable));
+    private final ExecutorService executor = Executors.newSingleThreadExecutor(runnable -> UpdateManager.newWorkerThread(runnable));
     private final Handler main = new Handler(Looper.getMainLooper());
     private Phase phase = Phase.IDLE;
 
@@ -54,7 +54,7 @@ final class UpdateManager {
         return updateManager;
     }
 
-    static Thread newStep0(Runnable task) {
+    static Thread newWorkerThread(Runnable task) {
         Thread thread = new Thread(task, "pulse-updates");
         thread.setDaemon(true);
         return thread;
@@ -109,58 +109,52 @@ final class UpdateManager {
         }
         this.phase = Phase.CHECKING;
         changed();
-        this.executor.execute(() -> UpdateManager.this.checkStep6());
-    }
+        this.executor.execute(() -> {
+            try {
+                final UpdateClient.Update next = this.client.check();
+                if (next == null) {
+                    this.main.post(() -> {
+                        this.update = null;
+                        this.apk = null;
+                        this.phase = Phase.CURRENT;
+                        changed();
 
-    public void checkStep6() {
-        try {
-            final UpdateClient.Update next = this.client.check();
-            if (next == null) {
-                this.main.post(() -> UpdateManager.this.checkStep1());
-                return;
+                    });
+                    return;
+                }
+                this.main.post(() -> {
+                    this.phase = Phase.DOWNLOADING;
+                    changed();
+
+                });
+                final File file = this.client.download(next);
+                this.main.post(() -> {
+                    this.update = next;
+                    this.apk = file;
+                    this.offered = false;
+                    this.phase = Phase.READY;
+                    changed();
+
+                });
+            } catch (UpdateClient.FeedMissing e) {
+                this.main.post(() -> {
+                    this.update = null;
+                    this.apk = null;
+                    this.phase = Phase.UNPUBLISHED;
+                    changed();
+
+                });
+            } catch (Exception e2) {
+                this.main.post(() -> {
+                    this.update = null;
+                    this.apk = null;
+                    this.phase = Phase.ERROR;
+                    changed();
+
+                });
             }
-            this.main.post(() -> UpdateManager.this.checkStep2());
-            final File file = this.client.download(next);
-            this.main.post(() -> UpdateManager.this.checkStep3(next, file));
-        } catch (UpdateClient.FeedMissing e) {
-            this.main.post(() -> UpdateManager.this.checkStep4());
-        } catch (Exception e2) {
-            this.main.post(() -> UpdateManager.this.checkStep5());
-        }
-    }
 
-    public void checkStep1() {
-        this.update = null;
-        this.apk = null;
-        this.phase = Phase.CURRENT;
-        changed();
-    }
-
-    public void checkStep2() {
-        this.phase = Phase.DOWNLOADING;
-        changed();
-    }
-
-    public void checkStep3(UpdateClient.Update next, File file) {
-        this.update = next;
-        this.apk = file;
-        this.offered = false;
-        this.phase = Phase.READY;
-        changed();
-    }
-
-    public void checkStep4() {
-        this.update = null;
-        this.apk = null;
-        this.phase = Phase.UNPUBLISHED;
-        changed();
-    }
-
-    public void checkStep5() {
-        this.update = null;
-        this.apk = null;
-        this.phase = Phase.ERROR;
-        changed();
+        });
     }
 
     void verify(final Consumer<File> success, final Runnable failure) {
@@ -171,7 +165,22 @@ final class UpdateManager {
             if (this.apk != null) {
                 final UpdateClient.Update expected = this.update;
                 final File file = this.apk;
-                this.executor.execute(() -> UpdateManager.this.verifyStep9(file, expected, success, failure));
+                this.executor.execute(() -> {
+                    try {
+                        this.client.verifyReady(file, expected);
+                        this.main.post(() -> success.accept(file));
+                    } catch (Exception e) {
+                        this.main.post(() -> {
+                            this.update = null;
+                            this.apk = null;
+                            this.phase = Phase.ERROR;
+                            changed();
+                            failure.run();
+
+                        });
+                    }
+
+                });
                 return;
             }
             failure2 = failure;
@@ -179,20 +188,4 @@ final class UpdateManager {
         failure2.run();
     }
 
-    public void verifyStep9(final File file, UpdateClient.Update expected, final Consumer success, final Runnable failure) {
-        try {
-            this.client.verifyReady(file, expected);
-            this.main.post(() -> success.accept(file));
-        } catch (Exception e) {
-            this.main.post(() -> UpdateManager.this.verifyStep8(failure));
-        }
-    }
-
-    public void verifyStep8(Runnable failure) {
-        this.update = null;
-        this.apk = null;
-        this.phase = Phase.ERROR;
-        changed();
-        failure.run();
-    }
 }

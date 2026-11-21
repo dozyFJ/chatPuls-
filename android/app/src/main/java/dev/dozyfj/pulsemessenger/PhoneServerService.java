@@ -33,8 +33,8 @@ public final class PhoneServerService extends Service {
         this.host.attach(this);
         NotificationManager notifications = (NotificationManager) getSystemService(NotificationManager.class);
         notifications.createNotificationChannel(new NotificationChannel("phone-server", "Сервер на телефоне", 2));
-        PendingIntent open = PendingIntent.getActivity(this, 0, new Intent(this, (Class<?>) MainActivity.class), 201326592);
-        PendingIntent stop = PendingIntent.getService(this, 1, new Intent(this, (Class<?>) PhoneServerService.class).setAction(STOP), 201326592);
+        PendingIntent open = PendingIntent.getActivity(this, 0, new Intent(this, (Class<?>) MainActivity.class), PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        PendingIntent stop = PendingIntent.getService(this, 1, new Intent(this, (Class<?>) PhoneServerService.class).setAction(STOP), PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         Notification notification = new Notification.Builder(this, "phone-server").setSmallIcon(android.R.drawable.stat_notify_sync).setContentTitle("Сервер Pulse включён").setContentText("Открыть Pulse или остановить сервер").setContentIntent(open).setOngoing(true).addAction(new Notification.Action.Builder((Icon) null, "Остановить", stop).build()).build();
         try {
             if (Build.VERSION.SDK_INT >= 29) {
@@ -42,42 +42,41 @@ public final class PhoneServerService extends Service {
             } else {
                 startForeground(73, notification);
             }
-            this.worker.execute(() -> PhoneServerService.this.onCreateStep0());
-        } catch (RuntimeException e) {
-            this.host.failed(this);
-        }
-    }
+            this.worker.execute(() -> {
+                try {
+                    PhoneIdentity identity = PhoneIdentity.load(false);
+                    if (this.destroyed) {
+                        return;
+                    }
+                    this.store = new PhoneServerStore(this);
+                    this.store.getWritableDatabase();
+                    if (this.destroyed) {
+                        return;
+                    }
+                    this.wake = ((PowerManager) getSystemService(PowerManager.class)).newWakeLock(1, "Pulse:PhoneServer");
+                    this.wake.acquire();
+                    try {
+                        startServer(identity);
+                    } catch (SSLException legacyError) {
+                        PhoneIdentity compatible = PhoneIdentity.load(true);
+                        if (compatible.fingerprint.equals(identity.fingerprint)) {
+                            throw legacyError;
+                        }
+                        this.server.close();
+                        if (this.destroyed) {
+                            return;
+                        }
+                        identity = compatible;
+                        startServer(identity);
+                    }
+                    this.host.running(this, identity.fingerprint, this.server.port());
+                } catch (Exception error) {
+                    Log.e("PulsePhoneServer", "Phone server startup failed", error);
+                    this.host.failed(this);
+                }
 
-    public void onCreateStep0() {
-        try {
-            PhoneIdentity identity = PhoneIdentity.load(false);
-            if (this.destroyed) {
-                return;
-            }
-            this.store = new PhoneServerStore(this);
-            this.store.getWritableDatabase();
-            if (this.destroyed) {
-                return;
-            }
-            this.wake = ((PowerManager) getSystemService(PowerManager.class)).newWakeLock(1, "Pulse:PhoneServer");
-            this.wake.acquire();
-            try {
-                startServer(identity);
-            } catch (SSLException legacyError) {
-                PhoneIdentity compatible = PhoneIdentity.load(true);
-                if (compatible.fingerprint.equals(identity.fingerprint)) {
-                    throw legacyError;
-                }
-                this.server.close();
-                if (this.destroyed) {
-                    return;
-                }
-                identity = compatible;
-                startServer(identity);
-            }
-            this.host.running(this, identity.fingerprint, this.server.port());
-        } catch (Exception error) {
-            Log.e("PulsePhoneServer", "Phone server startup failed", error);
+            });
+        } catch (RuntimeException e) {
             this.host.failed(this);
         }
     }
@@ -104,26 +103,25 @@ public final class PhoneServerService extends Service {
     public void onDestroy() {
         this.destroyed = true;
         this.host.stopping(this);
-        this.worker.execute(() -> PhoneServerService.this.onDestroyStep1());
+        this.worker.execute(() -> {
+            try {
+                if (this.server != null) {
+                    this.server.close();
+                }
+                if (this.store != null) {
+                    this.store.close();
+                }
+            } finally {
+                if (this.wake != null && this.wake.isHeld()) {
+                    this.wake.release();
+                }
+                this.host.stopped(this);
+            }
+
+        });
         this.worker.shutdown();
         stopForeground(1);
         super.onDestroy();
-    }
-
-    public void onDestroyStep1() {
-        try {
-            if (this.server != null) {
-                this.server.close();
-            }
-            if (this.store != null) {
-                this.store.close();
-            }
-        } finally {
-            if (this.wake != null && this.wake.isHeld()) {
-                this.wake.release();
-            }
-            this.host.stopped(this);
-        }
     }
 
     @Override

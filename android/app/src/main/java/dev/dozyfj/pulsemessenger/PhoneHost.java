@@ -96,29 +96,27 @@ final class PhoneHost {
     }
 
     void running(final PhoneServerService owner, final String pin, final int actualPort) {
-        this.main.post(() -> PhoneHost.this.runningStep0(owner, pin, actualPort));
-    }
-
-    public void runningStep0(PhoneServerService owner, String pin, int actualPort) {
-        if (this.service != owner || this.phase == Phase.STOPPING) {
-            return;
-        }
-        this.fingerprint = pin;
-        this.port = actualPort;
-        this.phase = Phase.RUNNING;
-        changed();
-    }
-
-    public void failedStep1(PhoneServerService owner) {
-        if (this.service == owner) {
-            this.phase = Phase.ERROR;
+        this.main.post(() -> {
+            if (this.service != owner || this.phase == Phase.STOPPING) {
+                return;
+            }
+            this.fingerprint = pin;
+            this.port = actualPort;
+            this.phase = Phase.RUNNING;
             changed();
-            owner.stopSelf();
-        }
+
+        });
     }
 
     void failed(final PhoneServerService owner) {
-        this.main.post(() -> PhoneHost.this.failedStep1(owner));
+        this.main.post(() -> {
+            if (this.service == owner) {
+                this.phase = Phase.ERROR;
+                changed();
+                owner.stopSelf();
+            }
+
+        });
     }
 
     void stopping(PhoneServerService owner) {
@@ -130,19 +128,18 @@ final class PhoneHost {
     }
 
     void stopped(final PhoneServerService owner) {
-        this.main.post(() -> PhoneHost.this.stoppedStep2(owner));
-    }
+        this.main.post(() -> {
+            if (this.service != owner) {
+                return;
+            }
+            this.service = null;
+            this.fingerprint = "";
+            if (this.phase != Phase.ERROR) {
+                this.phase = Phase.STOPPED;
+            }
+            changed();
 
-    public void stoppedStep2(PhoneServerService owner) {
-        if (this.service != owner) {
-            return;
-        }
-        this.service = null;
-        this.fingerprint = "";
-        if (this.phase != Phase.ERROR) {
-            this.phase = Phase.STOPPED;
-        }
-        changed();
+        });
     }
 
     String localUrl() {

@@ -43,33 +43,32 @@ final class PhoneServer implements AutoCloseable {
     }
 
     void start() {
-        this.acceptor = new Thread(() -> PhoneServer.this.startStep1(), "pulse-phone-listener");
-        this.acceptor.start();
-    }
-
-    public void startStep1() {
-        while (!this.listener.isClosed()) {
-            try {
-                final SSLSocket socket = (SSLSocket) this.listener.accept();
-                this.sockets.add(socket);
-                socket.setSoTimeout(8000);
+        this.acceptor = new Thread(() -> {
+            while (!this.listener.isClosed()) {
                 try {
-                    this.workers.execute(() -> PhoneServer.this.serve(socket));
-                } catch (RejectedExecutionException e) {
-                    this.sockets.remove(socket);
-                    socket.close();
-                }
-            } catch (IOException e2) {
-                if (!this.listener.isClosed()) {
-                    close();
+                    final SSLSocket socket = (SSLSocket) this.listener.accept();
+                    this.sockets.add(socket);
+                    socket.setSoTimeout(8000);
+                    try {
+                        this.workers.execute(() -> PhoneServer.this.serve(socket));
+                    } catch (RejectedExecutionException e) {
+                        this.sockets.remove(socket);
+                        socket.close();
+                    }
+                } catch (IOException e2) {
+                    if (!this.listener.isClosed()) {
+                        close();
+                    }
                 }
             }
-        }
+
+        }, "pulse-phone-listener");
+        this.acceptor.start();
     }
 
     private synchronized boolean allowed(String address) {
         final long now = System.currentTimeMillis();
-        this.attempts.entrySet().removeIf(obj -> PhoneServer.allowedStep2(now, (Map.Entry) obj));
+        this.attempts.entrySet().removeIf(obj -> PhoneServer.isAttemptExpired(now, (Map.Entry) obj));
         long[] entry = this.attempts.get(address);
         if (entry != null) {
             long j = entry[1] + 1;
@@ -83,7 +82,7 @@ final class PhoneServer implements AutoCloseable {
         return true;
     }
 
-    static boolean allowedStep2(long now, Map.Entry entry) {
+    static boolean isAttemptExpired(long now, Map.Entry entry) {
         return now - ((long[]) entry.getValue())[0] >= 60000;
     }
 

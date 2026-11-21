@@ -182,48 +182,42 @@ final class PulseCalls {
             schedulePoll(2500L);
         } else {
             this.polling = true;
-            this.network.execute(() -> PulseCalls.this.pollStep3(account));
-        }
-    }
+            this.network.execute(() -> {
+                Handler handler;
+                Runnable runnable;
+                try {
+                    try {
+                        final JSONArray items = new PulseApi(account.server, account.token).request(ENDPOINT, null).getJSONArray("calls");
+                        this.main.post(() -> {
+                            if (!this.running || !account.equals(this.currentAccount.get())) {
+                                return;
+                            }
+                            receive(account, items);
 
-    public void pollStep3(final Account account) {
-        Handler handler;
-        Runnable runnable;
-        try {
-            try {
-                final JSONArray items = new PulseApi(account.server, account.token).request(ENDPOINT, null).getJSONArray("calls");
-                this.main.post(() -> PulseCalls.this.pollStep0(account, items));
-                handler = this.main;
-                runnable = () -> PulseCalls.this.pollStep2();
-            } catch (PulseApi.ApiError error) {
-                if (error.code == 404) {
-                    this.main.post(() -> PulseCalls.this.pollStep1(account));
+                        });
+                        handler = this.main;
+                        runnable = () -> PulseCalls.this.onPollFinished();
+                    } catch (PulseApi.ApiError error) {
+                        if (error.code == 404) {
+                            this.main.post(() -> this.unsupported = account);
+                        }
+                        handler = this.main;
+                        runnable = () -> PulseCalls.this.onPollFinished();
+                    } catch (Exception e) {
+                        handler = this.main;
+                        runnable = () -> PulseCalls.this.onPollFinished();
+                    }
+                    handler.post(runnable);
+                } catch (Throwable th) {
+                    this.main.post(() -> PulseCalls.this.onPollFinished());
+                    throw th;
                 }
-                handler = this.main;
-                runnable = () -> PulseCalls.this.pollStep2();
-            } catch (Exception e) {
-                handler = this.main;
-                runnable = () -> PulseCalls.this.pollStep2();
-            }
-            handler.post(runnable);
-        } catch (Throwable th) {
-            this.main.post(() -> PulseCalls.this.pollStep2());
-            throw th;
+
+            });
         }
     }
 
-    public void pollStep0(Account account, JSONArray items) {
-        if (!this.running || !account.equals(this.currentAccount.get())) {
-            return;
-        }
-        receive(account, items);
-    }
-
-    public void pollStep1(Account account) {
-        this.unsupported = account;
-    }
-
-    public void pollStep2() {
+    public void onPollFinished() {
         this.polling = false;
         schedulePoll(1200L);
     }
@@ -283,9 +277,9 @@ final class PulseCalls {
 
     private void showIncoming(final Session session) {
         session.dialog = new CallScreen(this.activity, session.peer, "Входящий звонок", true, this.avatar.apply(session.peer));
-        session.dialog.action("Отклонить", -5031099, () -> PulseCalls.this.showIncomingStep4(session));
-        session.dialog.action("Принять", -14191540, () -> PulseCalls.this.requestMicrophone(session));
-        session.dialog.show(() -> PulseCalls.this.showIncomingStep6(session));
+        session.dialog.action("Отклонить", 0xFFB33B45, () -> finish(session, true, CallHistory.Outcome.DECLINED));
+        session.dialog.action("Принять", 0xFF27744C, () -> PulseCalls.this.requestMicrophone(session));
+        session.dialog.show(() -> finish(session, true));
         try {
             session.ringtone = RingtoneManager.getRingtone(this.activity, RingtoneManager.getDefaultUri(1));
             if (session.ringtone != null) {
@@ -296,14 +290,6 @@ final class PulseCalls {
             }
         } catch (RuntimeException e) {
         }
-    }
-
-    public void showIncomingStep4(Session session) {
-        finish(session, true, CallHistory.Outcome.DECLINED);
-    }
-
-    public void showIncomingStep6(Session session) {
-        finish(session, true);
     }
 
     private void startAudio(final Session session) {
@@ -323,39 +309,30 @@ final class PulseCalls {
             session.status = session.dialog.status;
             session.web = new WebView(this.activity);
             session.dialog.attachMedia(session.web);
-            session.muteButton = session.dialog.microphone(() -> PulseCalls.startAudioStep7(session));
-            session.endButton = session.dialog.action("Отмена", -5031099, () -> PulseCalls.this.startAudioStep8(session));
-            session.dialog.show(() -> PulseCalls.this.startAudioStep9(session));
+            session.muteButton = session.dialog.microphone(() -> PulseCalls.toggleMute(session));
+            session.endButton = session.dialog.action("Отмена", 0xFFB33B45, () -> finish(session, true));
+            session.dialog.show(() -> finish(session, true));
             AudioManager audio = (AudioManager) this.activity.getSystemService(AudioManager.class);
             session.previousAudioMode = audio.getMode();
             audio.setMode(3);
             configureWeb(session);
-            this.main.postDelayed(() -> PulseCalls.this.startAudioStep10(session), 22000L);
+            this.main.postDelayed(() -> {
+                if (this.active != session || session.published) {
+                    return;
+                }
+                fail(session, "Не удалось подготовить звонок");
+
+            }, 22000L);
         } catch (RuntimeException e) {
             fail(session, "Не удалось запустить аудиосвязь");
         }
     }
 
-    static void startAudioStep7(Session session) {
+    static void toggleMute(Session session) {
         session.muted = !session.muted;
         session.web.evaluateJavascript("mute(" + session.muted + ")", null);
         session.muteButton.setText(session.muted ? "Микрофон выкл." : "Микрофон вкл.");
         session.muteButton.setSelected(session.muted);
-    }
-
-    public void startAudioStep8(Session session) {
-        finish(session, true);
-    }
-
-    public void startAudioStep9(Session session) {
-        finish(session, true);
-    }
-
-    public void startAudioStep10(Session session) {
-        if (this.active != session || session.published) {
-            return;
-        }
-        fail(session, "Не удалось подготовить звонок");
     }
 
     private void configureWeb(final Session session) {
@@ -411,16 +388,16 @@ final class PulseCalls {
         public void onPermissionRequest(final PermissionRequest request) {
             Handler handler = PulseCalls.this.main;
             final Session session = this.session;
-            handler.post(() -> PulseCalls.MediaPermissions.this.onPermissionRequestStep0(session, request));
+            handler.post(() -> {
+                    if (PulseCalls.this.active == session && "https".equals(request.getOrigin().getScheme()) && PulseCalls.HOST.equals(request.getOrigin().getHost()) && PulseCalls.this.activity.checkSelfPermission("android.permission.RECORD_AUDIO") == 0) {
+                        request.grant(new String[]{"android.webkit.resource.AUDIO_CAPTURE"});
+                    } else {
+                        request.deny();
+                    }
+
+            });
         }
 
-        public void onPermissionRequestStep0(Session session, PermissionRequest request) {
-            if (PulseCalls.this.active == session && "https".equals(request.getOrigin().getScheme()) && PulseCalls.HOST.equals(request.getOrigin().getHost()) && PulseCalls.this.activity.checkSelfPermission("android.permission.RECORD_AUDIO") == 0) {
-                request.grant(new String[]{"android.webkit.resource.AUDIO_CAPTURE"});
-            } else {
-                request.deny();
-            }
-        }
     }
 
     public final class Bridge {
@@ -432,39 +409,38 @@ final class PulseCalls {
 
         @JavascriptInterface
         public void description(final String sdp) {
-            PulseCalls.this.main.post(() -> PulseCalls.Bridge.this.descriptionStep0(sdp));
-        }
+            PulseCalls.this.main.post(() -> {
+                    if (PulseCalls.this.active != this.session || this.session.web == null) {
+                        return;
+                    }
+                    if (this.session.muted) {
+                        this.session.web.evaluateJavascript("mute(true)", null);
+                    }
+                    this.session.published = false;
+                    PulseCalls.this.request(this.session, this.session.outgoing() ? "offer" : "answer", sdp);
 
-        public void descriptionStep0(String sdp) {
-            if (PulseCalls.this.active != this.session || this.session.web == null) {
-                return;
-            }
-            if (this.session.muted) {
-                this.session.web.evaluateJavascript("mute(true)", null);
-            }
-            this.session.published = false;
-            PulseCalls.this.request(this.session, this.session.outgoing() ? "offer" : "answer", sdp);
+            });
         }
 
         @JavascriptInterface
         public void event(final String state) {
-            PulseCalls.this.main.post(() -> PulseCalls.Bridge.this.eventStep1(state));
+            PulseCalls.this.main.post(() -> {
+                    if (PulseCalls.this.active != this.session || this.session.web == null) {
+                        return;
+                    }
+                    if ("connected".equals(state) && this.session.connectedAt == 0) {
+                        this.session.connectedAt = SystemClock.elapsedRealtime();
+                        this.session.endButton.setText("Завершить");
+                        PulseCalls.this.updateDuration(this.session);
+                        return;
+                    }
+                    if ("failed".equals(state)) {
+                        PulseCalls.this.fail(this.session, "Не удалось соединиться. Проверьте, что оба телефона в одной сети Wi‑Fi");
+                    }
+
+            });
         }
 
-        public void eventStep1(String state) {
-            if (PulseCalls.this.active != this.session || this.session.web == null) {
-                return;
-            }
-            if ("connected".equals(state) && this.session.connectedAt == 0) {
-                this.session.connectedAt = SystemClock.elapsedRealtime();
-                this.session.endButton.setText("Завершить");
-                PulseCalls.this.updateDuration(this.session);
-                return;
-            }
-            if ("failed".equals(state)) {
-                PulseCalls.this.fail(this.session, "Не удалось соединиться. Проверьте, что оба телефона в одной сети Wi‑Fi");
-            }
-        }
     }
 
     public void updateDuration(final Session session) {
@@ -481,57 +457,54 @@ final class PulseCalls {
     }
 
     private void request(final Session session, final String action, final String sdp, final String reason) {
-        this.network.execute(() -> PulseCalls.this.requestStep14(session, action, sdp, reason));
-    }
+        this.network.execute(() -> {
+            try {
+                JSONObject body = new JSONObject().put("id", session.id).put("action", action);
+                if (sdp != null) {
+                    body.put("sdp", sdp);
+                }
+                if (reason != null) {
+                    body.put("reason", reason);
+                }
+                if (action.equals("offer")) {
+                    body.put("to", session.peer);
+                }
+                new PulseApi(session.account.server, session.account.token).request(ENDPOINT, body);
+                if (!action.equals("end")) {
+                    this.main.post(() -> {
+                        if (this.active != session) {
+                            return;
+                        }
+                        this.unsupported = null;
+                        session.published = true;
+                        if (session.outgoing() && session.connectedAt == 0) {
+                            session.status.setText("Ожидание ответа…");
+                        }
+                        schedulePoll(0L);
 
-    public void requestStep14(final Session session, String action, String sdp, String reason) {
-        try {
-            JSONObject body = new JSONObject().put("id", session.id).put("action", action);
-            if (sdp != null) {
-                body.put("sdp", sdp);
-            }
-            if (reason != null) {
-                body.put("reason", reason);
-            }
-            if (action.equals("offer")) {
-                body.put("to", session.peer);
-            }
-            new PulseApi(session.account.server, session.account.token).request(ENDPOINT, body);
-            if (!action.equals("end")) {
-                this.main.post(() -> PulseCalls.this.requestStep12(session));
-            }
-        } catch (Exception error) {
-            if (action.equals("end")) {
-                return;
-            }
-            this.main.post(() -> PulseCalls.this.requestStep13(error, session));
-        }
-    }
+                    });
+                }
+            } catch (Exception error) {
+                if (action.equals("end")) {
+                    return;
+                }
+                this.main.post(() -> {
+                    if (error instanceof PulseApi.ApiError) {
+                        PulseApi.ApiError api = (PulseApi.ApiError) error;
+                        if (api.code == 409) {
+                            fail(session, "Собеседник занят или звонок уже завершён");
+                            return;
+                        } else if (api.code == 404) {
+                            fail(session, "Собеседник или функция звонков недоступны на сервере");
+                            return;
+                        }
+                    }
+                    fail(session, "Сервер звонков не ответил");
 
-    public void requestStep12(Session session) {
-        if (this.active != session) {
-            return;
-        }
-        this.unsupported = null;
-        session.published = true;
-        if (session.outgoing() && session.connectedAt == 0) {
-            session.status.setText("Ожидание ответа…");
-        }
-        schedulePoll(0L);
-    }
-
-    public void requestStep13(Exception error, Session session) {
-        if (error instanceof PulseApi.ApiError) {
-            PulseApi.ApiError api = (PulseApi.ApiError) error;
-            if (api.code == 409) {
-                fail(session, "Собеседник занят или звонок уже завершён");
-                return;
-            } else if (api.code == 404) {
-                fail(session, "Собеседник или функция звонков недоступны на сервере");
-                return;
+                });
             }
-        }
-        fail(session, "Сервер звонков не ответил");
+
+        });
     }
 
     public void fail(Session session, String message) {
@@ -604,6 +577,6 @@ final class PulseCalls {
     }
 
     private void toast(String message) {
-        Toast.makeText(this.activity, message, 1).show();
+        Toast.makeText(this.activity, message, Toast.LENGTH_LONG).show();
     }
 }

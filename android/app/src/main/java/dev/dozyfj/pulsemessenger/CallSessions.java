@@ -67,11 +67,11 @@ final class CallSessions {
                 call.changed = now;
             }
         }
-        this.calls.values().removeIf(obj -> CallSessions.pruneStep0(now, (CallSessions.Call) obj));
+        this.calls.values().removeIf(obj -> CallSessions.isStale(now, (CallSessions.Call) obj));
         return now;
     }
 
-    static boolean pruneStep0(long now, Call call) {
+    static boolean isStale(long now, Call call) {
         return !call.live() && now - call.changed > 20000;
     }
 
@@ -113,7 +113,7 @@ final class CallSessions {
                 throw new PhoneServerStore.Failure(404);
             }
             if (call == null && this.calls.size() < 128) {
-                if (!this.calls.values().stream().anyMatch(obj -> CallSessions.changeStep1(user, to, (CallSessions.Call) obj))) {
+                if (!this.calls.values().stream().anyMatch(obj -> CallSessions.isBusyWith(user, to, (CallSessions.Call) obj))) {
                     Call created = new Call(id, user, to, offer, now);
                     this.calls.put(id, created);
                     return created.json();
@@ -151,7 +151,7 @@ final class CallSessions {
         return call.json();
     }
 
-    static boolean changeStep1(String user, String to, Call item) {
+    static boolean isBusyWith(String user, String to, Call item) {
         return item.live() && (item.includes(user) || item.includes(to));
     }
 

@@ -96,7 +96,7 @@ final class PulseApi {
             }}, null);
             HttpsURLConnection https = (HttpsURLConnection) connection;
             https.setSSLSocketFactory(tls.getSocketFactory());
-            https.setHostnameVerifier((str, sSLSession) -> PulseApi.requestStep0(pin, str, sSLSession));
+            https.setHostnameVerifier((str, sSLSession) -> PulseApi.matchesPin(pin, str, sSLSession));
         }
         try {
             connection.setConnectTimeout(8000);
@@ -137,7 +137,7 @@ final class PulseApi {
         }
     }
 
-    static boolean requestStep0(String pin, String hostname, SSLSession session) {
+    static boolean matchesPin(String pin, String hostname, SSLSession session) {
         try {
             return pin.equals(PhoneServerStore.hex(MessageDigest.getInstance("SHA-256").digest(session.getPeerCertificates()[0].getEncoded())));
         } catch (Exception e) {

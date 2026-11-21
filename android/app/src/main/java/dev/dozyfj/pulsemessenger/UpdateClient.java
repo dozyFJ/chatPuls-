@@ -26,7 +26,7 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 final class UpdateClient implements UpdateManager.Source {
-    private static final int APK_LIMIT = 104857600;
+    private static final int APK_LIMIT = 100 * 1024 * 1024;
     private static final int MANIFEST_LIMIT = 16384;
     private static final String RAW_REPO = "https://raw.githubusercontent.com/dozyFJ/chatPuls-/";
     private static final String UPDATES_REF = "https://api.github.com/repos/dozyFJ/chatPuls-/git/ref/heads/updates";
@@ -237,7 +237,7 @@ final class UpdateClient implements UpdateManager.Source {
     }
 
     private static int signingFlag() {
-        return Build.VERSION.SDK_INT >= 28 ? 134217728 : 64;
+        return Build.VERSION.SDK_INT >= 28 ? PackageManager.GET_SIGNING_CERTIFICATES : PackageManager.GET_SIGNATURES;
     }
 
     private static long versionCode(PackageInfo info) {

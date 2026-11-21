@@ -26,7 +26,7 @@ import android.widget.TextView;
 import java.util.Locale;
 
 final class CallScreen {
-    private static final int BACKGROUND = -15132132;
+    private static final int BACKGROUND = 0xFF191A1C;
     private final Activity activity;
     private final LinearLayout controls;
     private final Dialog dialog;
@@ -39,30 +39,30 @@ final class CallScreen {
         this.activity = activity;
         this.dialog = new Dialog(activity, android.R.style.Theme_Material_NoActionBar);
         this.screen = new LinearLayout(activity);
-        this.screen.setOrientation(1);
-        this.screen.setGravity(1);
+        this.screen.setOrientation(LinearLayout.VERTICAL);
+        this.screen.setGravity(Gravity.CENTER_HORIZONTAL);
         this.screen.setBackgroundColor(BACKGROUND);
         this.screen.setPadding(dp(22), dp(16), dp(22), dp(24));
         this.screen.setFitsSystemWindows(true);
-        this.screen.addView(label("Pulse", 17, -3552306, true), new LinearLayout.LayoutParams(-1, -2));
+        this.screen.addView(label("Pulse", 17, 0xFFC9CBCE, true), new LinearLayout.LayoutParams(-1, -2));
         this.screen.addView(new View(activity), new LinearLayout.LayoutParams(1, 0, 0.65f));
         int min = Math.min(dp(430), activity.getResources().getDisplayMetrics().widthPixels - dp(44));
         LinearLayout linearLayout = new LinearLayout(activity);
-        linearLayout.setGravity(16);
+        linearLayout.setGravity(Gravity.CENTER_VERTICAL);
         linearLayout.setPadding(dp(16), dp(16), dp(16), dp(16));
-        GradientDrawable shape = shape(-14079186, 22);
-        shape.setStroke(dp(1), -11841966);
+        GradientDrawable shape = shape(0xFF292B2E, 22);
+        shape.setStroke(dp(1), 0xFF4B4E52);
         linearLayout.setBackground(shape);
         this.screen.addView(linearLayout, new LinearLayout.LayoutParams(min, -2));
         String str3 = str.trim().isEmpty() ? "?" : str;
         LinearLayout linearLayout2 = new LinearLayout(activity);
-        linearLayout2.setOrientation(1);
+        linearLayout2.setOrientation(LinearLayout.VERTICAL);
         linearLayout.addView(linearLayout2, new LinearLayout.LayoutParams(0, -2, 1.55f));
-        GradientDrawable shape2 = shape(-13092290, 28);
+        GradientDrawable shape2 = shape(0xFF383A3E, 28);
         shape2.setShape(1);
-        shape2.setStroke(dp(1), -9341831);
+        shape2.setStroke(dp(1), 0xFF717479);
         if (bitmap == null) {
-            label = label(str3.substring(0, str3.offsetByCodePoints(0, 1)).toUpperCase(Locale.ROOT), 25, -1446931, true);
+            label = label(str3.substring(0, str3.offsetByCodePoints(0, 1)).toUpperCase(Locale.ROOT), 25, 0xFFE9EBED, true);
         } else {
             ImageView imageView = new ImageView(activity);
             imageView.setImageBitmap(bitmap);
@@ -80,37 +80,37 @@ final class CallScreen {
         LinearLayout.LayoutParams layoutParams = new LinearLayout.LayoutParams(-1, -2);
         layoutParams.topMargin = dp(8);
         linearLayout2.addView(label2, layoutParams);
-        TextView label3 = label(str3.equals("?") ? "—" : "@" + str3, 13, -4604736, false);
+        TextView label3 = label(str3.equals("?") ? "—" : "@" + str3, 13, 0xFFB9BCC0, false);
         label3.setGravity(Gravity.START);
         label3.setSingleLine(true);
         label3.setEllipsize(TextUtils.TruncateAt.END);
         linearLayout2.addView(label3, new LinearLayout.LayoutParams(-1, -2));
-        this.status = label(str2, 14, -1775896, true);
+        this.status = label(str2, 14, 0xFFE4E6E8, true);
         this.status.setGravity(Gravity.START);
         this.status.setAccessibilityLiveRegion(1);
         LinearLayout.LayoutParams layoutParams2 = new LinearLayout.LayoutParams(-1, -2);
         layoutParams2.topMargin = dp(9);
         linearLayout2.addView(this.status, layoutParams2);
         View view = new View(activity);
-        view.setBackgroundColor(-11841966);
+        view.setBackgroundColor(0xFF4B4E52);
         LinearLayout.LayoutParams layoutParams3 = new LinearLayout.LayoutParams(dp(1), dp(96));
         layoutParams3.setMargins(dp(8), 0, dp(8), 0);
         linearLayout.addView(view, layoutParams3);
         LinearLayout linearLayout3 = new LinearLayout(activity);
-        linearLayout3.setOrientation(1);
-        linearLayout3.setGravity(17);
+        linearLayout3.setOrientation(LinearLayout.VERTICAL);
+        linearLayout3.setGravity(Gravity.CENTER);
         linearLayout.addView(linearLayout3, new LinearLayout.LayoutParams(0, -2, 1.0f));
-        linearLayout3.addView(label("Аудиозвонок", 13, -855052, true), new LinearLayout.LayoutParams(-1, -2));
+        linearLayout3.addView(label("Аудиозвонок", 13, 0xFFF2F3F4, true), new LinearLayout.LayoutParams(-1, -2));
         linearLayout3.addView(new PulseWave(activity), new LinearLayout.LayoutParams(-1, dp(42)));
-        linearLayout3.addView(label(z ? "Входящий" : "Исходящий", 12, -4604736, false), new LinearLayout.LayoutParams(-1, -2));
+        linearLayout3.addView(label(z ? "Входящий" : "Исходящий", 12, 0xFFB9BCC0, false), new LinearLayout.LayoutParams(-1, -2));
         this.microphoneRow = new LinearLayout(activity);
-        this.microphoneRow.setGravity(8388627);
+        this.microphoneRow.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
         LinearLayout.LayoutParams layoutParams4 = new LinearLayout.LayoutParams(min, -2);
         layoutParams4.topMargin = dp(10);
         this.screen.addView(this.microphoneRow, layoutParams4);
         this.screen.addView(new View(activity), new LinearLayout.LayoutParams(1, 0, 1.3f));
         this.controls = new LinearLayout(activity);
-        this.controls.setGravity(17);
+        this.controls.setGravity(Gravity.CENTER);
         this.screen.addView(this.controls, new LinearLayout.LayoutParams(min, -2));
         this.dialog.setContentView(this.screen);
         this.dialog.setCanceledOnTouchOutside(false);
@@ -125,7 +125,7 @@ final class CallScreen {
         text.setText(value);
         text.setTextSize(size);
         text.setTextColor(color);
-        text.setGravity(17);
+        text.setGravity(Gravity.CENTER);
         if (bold) {
             text.setTypeface(Typeface.DEFAULT, 1);
         }
@@ -148,7 +148,7 @@ final class CallScreen {
     }
 
     Button microphone(Runnable run) {
-        Button action = control("Микрофон вкл.", -13355206, run);
+        Button action = control("Микрофон вкл.", 0xFF34373A, run);
         action.setPadding(dp(16), 0, dp(16), 0);
         this.microphoneRow.addView(action, new LinearLayout.LayoutParams(-2, dp(48)));
         return action;
@@ -162,7 +162,7 @@ final class CallScreen {
         action.setAllCaps(false);
         action.setMinWidth(0);
         action.setMinimumWidth(0);
-        action.setBackground(new RippleDrawable(ColorStateList.valueOf(872415231), shape(color, 24), null));
+        action.setBackground(new RippleDrawable(ColorStateList.valueOf(0x33FFFFFF), shape(color, 24), null));
         action.setOnClickListener(view -> run.run());
         return action;
     }
@@ -174,7 +174,7 @@ final class CallScreen {
             super(context);
             this.paint = new Paint(1);
             setImportantForAccessibility(2);
-            this.paint.setColor(-2828325);
+            this.paint.setColor(0xFFD4D7DB);
             this.paint.setStrokeWidth(CallScreen.this.dp(3));
             this.paint.setStrokeCap(Paint.Cap.ROUND);
         }
@@ -206,7 +206,7 @@ final class CallScreen {
         Window window = this.dialog.getWindow();
         if (window != null) {
             window.setBackgroundDrawable(new ColorDrawable(BACKGROUND));
-            window.addFlags(-2147483520);
+            window.addFlags(0x80000080);
             window.setStatusBarColor(BACKGROUND);
             window.setNavigationBarColor(BACKGROUND);
             if (Build.VERSION.SDK_INT >= 30 && window.getInsetsController() != null) {

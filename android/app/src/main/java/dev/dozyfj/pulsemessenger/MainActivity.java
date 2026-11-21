@@ -225,7 +225,7 @@ public final class MainActivity extends Activity {
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private final AtomicBoolean syncing = new AtomicBoolean();
-    private final Runnable hidePullRefreshHint = () -> MainActivity.this.newStep0();
+    private final Runnable hidePullRefreshHint = () -> MainActivity.this.hidePullRefreshHintNow();
     private final Runnable hostListener = () -> MainActivity.this.refreshHostControls();
     private final UpdateManager.Listener updateListener = () -> MainActivity.this.onUpdateChanged();
     private final Runnable poll = new Runnable() {
@@ -273,8 +273,8 @@ public final class MainActivity extends Activity {
         }
     }
 
-    public void newStep0() {
-        this.pullRefreshHint.setVisibility(8);
+    public void hidePullRefreshHintNow() {
+        this.pullRefreshHint.setVisibility(View.GONE);
     }
 
     @Override
@@ -284,20 +284,20 @@ public final class MainActivity extends Activity {
         setTheme(this.dark ? R.style.PulseDarkTheme : R.style.PulseTheme);
         super.onCreate(bundle);
         getWindow().setSoftInputMode(16);
-        this.store = new ChatStore(this);
+        this.store = ChatStore.get(this);
         this.callHistory = new CallHistory(this.preferences);
         this.calls = new PulseCalls(this, () -> {
-                PulseCalls.Account onCreateStep1;
-                onCreateStep1 = MainActivity.this.onCreateStep1();
-                return onCreateStep1;
+                PulseCalls.Account currentCallAccount;
+                currentCallAccount = MainActivity.this.currentCallAccount();
+                return currentCallAccount;
         }, obj -> {
-                boolean onCreateStep2;
-                onCreateStep2 = MainActivity.this.onCreateStep2((String) obj);
-                return onCreateStep2;
-        }, (obj, obj2) -> MainActivity.this.onCreateStep3((PulseCalls.Account) obj, (CallHistory.Entry) obj2), obj -> {
-                Bitmap onCreateStep4;
-                onCreateStep4 = MainActivity.this.onCreateStep4((String) obj);
-                return onCreateStep4;
+                boolean isPeerBlocked;
+                isPeerBlocked = MainActivity.this.isPeerBlocked((String) obj);
+                return isPeerBlocked;
+        }, (obj, obj2) -> MainActivity.this.recordCall((PulseCalls.Account) obj, (CallHistory.Entry) obj2), obj -> {
+                Bitmap peerAvatar;
+                peerAvatar = MainActivity.this.peerAvatar((String) obj);
+                return peerAvatar;
         });
         this.updates = UpdateManager.get(this);
         this.phoneHost = PhoneHost.get(this);
@@ -350,18 +350,18 @@ public final class MainActivity extends Activity {
         }
     }
 
-    public PulseCalls.Account onCreateStep1() {
+    public PulseCalls.Account currentCallAccount() {
         if (onlineAccount()) {
             return new PulseCalls.Account(this.preferences.getString("server", ""), this.preferences.getString("token", ""), user());
         }
         return null;
     }
 
-    public boolean onCreateStep2(String name) {
+    public boolean isPeerBlocked(String name) {
         return this.store.isBlocked(owner(), name);
     }
 
-    public void onCreateStep3(PulseCalls.Account account, CallHistory.Entry entry) {
+    public void recordCall(PulseCalls.Account account, CallHistory.Entry entry) {
         String historyOwner = account.server() + "|" + account.username();
         this.callHistory.add(historyOwner, entry);
         if (!this.resumed || this.page != 7 || !historyOwner.equals(owner())) {
@@ -370,7 +370,7 @@ public final class MainActivity extends Activity {
         showCallHistory();
     }
 
-    public Bitmap onCreateStep4(String name) {
+    public Bitmap peerAvatar(String name) {
         return loadProfilePhoto(chatAvatarKey(name));
     }
 
@@ -476,7 +476,7 @@ public final class MainActivity extends Activity {
     }
 
     public int ink() {
-        return this.dark ? -855052 : -14408668;
+        return this.dark ? 0xFFF2F3F4 : 0xFF242424;
     }
 
     private int accent() {
@@ -484,7 +484,7 @@ public final class MainActivity extends Activity {
     }
 
     private int onAccent() {
-        return this.dark ? -15066339 : -1;
+        return this.dark ? 0xFF1A1B1D : -1;
     }
 
     private GradientDrawable surface(int fill, int radius, int outline) {
@@ -502,7 +502,7 @@ public final class MainActivity extends Activity {
     }
 
     private GradientDrawable headerAccentPill() {
-        return surface(this.dark ? accent() : -13354431, 24, 0);
+        return surface(this.dark ? accent() : 0xFF343A41, 24, 0);
     }
 
     private int onHeaderAccent() {
@@ -510,7 +510,7 @@ public final class MainActivity extends Activity {
     }
 
     private int muted() {
-        return this.dark ? -4604736 : -10724260;
+        return this.dark ? 0xFFB9BCC0 : 0xFF5C5C5C;
     }
 
     private int headerInk() {
@@ -525,21 +525,21 @@ public final class MainActivity extends Activity {
     }
 
     private Drawable headerSurface() {
-        return barSurface(this.dark ? -14539738 : -1644052, 80);
+        return barSurface(this.dark ? 0xFF222426 : 0xFFE6E9EC, 80);
     }
 
     private int surfaceOutline() {
-        return this.dark ? -11841966 : 2054454664;
+        return this.dark ? 0xFF4B4E52 : 0x7A747D88;
     }
 
     private GradientDrawable card() {
-        int fill = this.dark ? -14079186 : -986380;
+        int fill = this.dark ? 0xFF292B2E : 0xFFF0F2F4;
         return surface(fill, 14, surfaceOutline());
     }
 
     private LinearLayout column() {
         LinearLayout view = new LinearLayout(this);
-        view.setOrientation(1);
+        view.setOrientation(LinearLayout.VERTICAL);
         return view;
     }
 
@@ -561,7 +561,7 @@ public final class MainActivity extends Activity {
         b.setTextSize(15.0f);
         b.setMinHeight(dp(48.0f));
         b.setTextColor(primary ? onAccent() : ink());
-        b.setBackground(new RippleDrawable(ColorStateList.valueOf(this.dark ? 872415231 : 640692272), primary ? accentPill(16) : card(), null));
+        b.setBackground(new RippleDrawable(ColorStateList.valueOf(this.dark ? 0x33FFFFFF : 0x26303030), primary ? accentPill(16) : card(), null));
         return b;
     }
 
@@ -579,13 +579,13 @@ public final class MainActivity extends Activity {
 
     private void buildShell() {
         LinearLayout column = column();
-        int background = this.dark ? -15132132 : -2235673;
+        int background = this.dark ? 0xFF191A1C : 0xFFDDE2E7;
         column.setBackgroundColor(background);
         FrameLayout frameLayout = new FrameLayout(this);
         frameLayout.addView(column, new FrameLayout.LayoutParams(-1, -1));
         setContentView(frameLayout);
         if (Build.VERSION.SDK_INT >= 29) {
-            frameLayout.addOnLayoutChangeListener((view, i, i2, i3, i4, i5, i6, i7, i8) -> MainActivity.this.buildShellStep5(view, i, i2, i3, i4, i5, i6, i7, i8));
+            frameLayout.addOnLayoutChangeListener((view, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom) -> view.setSystemGestureExclusionRects(Collections.singletonList(new Rect(0, 0, dp(24.0f), Math.min(bottom - top, dp(200.0f))))));
         }
         column.setAccessibilityDelegate(new View.AccessibilityDelegate() {
             @Override
@@ -609,7 +609,7 @@ public final class MainActivity extends Activity {
         ViewGroup.LayoutParams headerParams = new LinearLayout.LayoutParams(-1, -2);
         column.addView(column2, headerParams);
         LinearLayout headingRow = new LinearLayout(this);
-        headingRow.setGravity(16);
+        headingRow.setGravity(Gravity.CENTER_VERTICAL);
         headingRow.setMinimumHeight(dp(56.0f));
         int headerInset = dp(getResources().getConfiguration().screenWidthDp >= 360 ? 18.0f : 12.0f);
         headingRow.setPadding(headerInset, dp(6.0f), headerInset, dp(6.0f));
@@ -617,27 +617,27 @@ public final class MainActivity extends Activity {
         column2.addView(headerLine, new LinearLayout.LayoutParams(-1, -2));
         headerLine.addView(headingRow, new FrameLayout.LayoutParams(-1, -2));
         this.pulseBrand = buildPulseBrand();
-        headerLine.addView(this.pulseBrand, new FrameLayout.LayoutParams(-2, dp(40.0f), 17));
+        headerLine.addView(this.pulseBrand, new FrameLayout.LayoutParams(-2, dp(40.0f), Gravity.CENTER));
         this.headerBack = headerControl("‹");
         headingRow.addView(this.headerBack, new LinearLayout.LayoutParams(dp(40.0f), dp(40.0f)));
         this.feedShortcut = buildFeedTab(headingRow);
         this.settingsTabs = buildSettingsTabs(headingRow);
         buildClipsTabs(headingRow);
         LinearLayout heading = column();
-        heading.setGravity(1);
+        heading.setGravity(Gravity.CENTER_HORIZONTAL);
         LinearLayout.LayoutParams headingParams = new LinearLayout.LayoutParams(0, -2, 1.0f);
         headingParams.setMargins(dp(6.0f), 0, dp(6.0f), 0);
         headingRow.addView(heading, headingParams);
         this.headerTitle = text("", 20, headerInk(), true);
-        this.headerTitle.setGravity(17);
+        this.headerTitle.setGravity(Gravity.CENTER);
         this.headerTitle.setSingleLine(true);
         this.headerTitle.setEllipsize(TextUtils.TruncateAt.END);
         heading.addView(this.headerTitle, new LinearLayout.LayoutParams(-1, -2));
-        this.status = text("", 12, this.dark ? -4604736 : -10724260, false);
-        this.status.setGravity(17);
+        this.status = text("", 12, this.dark ? 0xFFB9BCC0 : 0xFF5C5C5C, false);
+        this.status.setGravity(Gravity.CENTER);
         heading.addView(this.status);
         this.notificationsButton = new ImageView(this);
-        GradientDrawable notificationBackground = surface(this.dark ? -13816014 : -854794, 24, this.dark ? 1442840575 : 1434026121);
+        GradientDrawable notificationBackground = surface(this.dark ? 0xFF2D2F32 : 0xFFF2F4F6, 24, this.dark ? 0x55FFFFFF : 0x55798089);
         notificationBackground.setShape(1);
         this.notificationsButton.setBackground(notificationBackground);
         this.notificationsButton.setPadding(dp(11.0f), dp(11.0f), dp(11.0f), dp(11.0f));
@@ -645,22 +645,27 @@ public final class MainActivity extends Activity {
         this.notificationsButton.setImageTintList(ColorStateList.valueOf(headerInk()));
         this.notificationsButton.setContentDescription("Уведомления");
         this.notificationsButton.setFocusable(true);
-        this.notificationsButton.setOnClickListener(view -> MainActivity.this.buildShellStep6(view));
+        this.notificationsButton.setOnClickListener(v -> showDrawer(true, true));
         LinearLayout.LayoutParams notificationParams = new LinearLayout.LayoutParams(dp(44.0f), dp(44.0f));
         notificationParams.setMarginStart(dp(6.0f));
         headingRow.addView(this.notificationsButton, notificationParams);
         this.audioCallButton = text("Звонок", 12, headerInk(), true);
-        this.audioCallButton.setGravity(17);
+        this.audioCallButton.setGravity(Gravity.CENTER);
         Drawable handset = getDrawable(R.drawable.ic_audio_call).mutate();
         handset.setTint(headerInk());
         handset.setBounds(0, 0, dp(15.0f), dp(15.0f));
         this.audioCallButton.setPadding(dp(7.0f), 0, dp(7.0f), 0);
         this.audioCallButton.setCompoundDrawablePadding(dp(4.0f));
         this.audioCallButton.setCompoundDrawablesRelative(handset, null, null, null);
-        this.audioCallButton.setBackground(surface(this.dark ? -13816014 : -854794, 18, surfaceOutline()));
+        this.audioCallButton.setBackground(surface(this.dark ? 0xFF2D2F32 : 0xFFF2F4F6, 18, surfaceOutline()));
         this.audioCallButton.setContentDescription("Аудиозвонок");
         this.audioCallButton.setFocusable(true);
-        this.audioCallButton.setOnClickListener(view -> MainActivity.this.buildShellStep7(view));
+        this.audioCallButton.setOnClickListener(v -> {
+            if (this.peer != null) {
+                this.calls.call(this.peer);
+            }
+
+        });
         headingRow.addView(this.audioCallButton, new LinearLayout.LayoutParams(dp(76.0f), dp(36.0f)));
         this.videoCallButton = addCallButton(headingRow, R.drawable.ic_video_call, "Видеозвонок");
         this.headerAction = headerControl("↻");
@@ -675,12 +680,12 @@ public final class MainActivity extends Activity {
         this.content.setPadding(dp(16.0f), dp(12.0f), dp(16.0f), dp(12.0f));
         this.scroll.addView(this.content);
         this.scrollActions = new LinearLayout(this);
-        this.scrollActions.setGravity(16);
+        this.scrollActions.setGravity(Gravity.CENTER_VERTICAL);
         this.scrollUpButton = floatingButton("↑", "К началу списка");
-        this.scrollUpButton.setVisibility(8);
-        this.scrollUpButton.setOnClickListener(view -> MainActivity.this.buildShellStep8(view));
+        this.scrollUpButton.setVisibility(View.GONE);
+        this.scrollUpButton.setOnClickListener(v -> this.scroll.smoothScrollTo(0, 0));
         this.scrollDownButton = floatingButton("↓", "К концу списка");
-        this.scrollDownButton.setOnClickListener(view -> MainActivity.this.buildShellStep9(view));
+        this.scrollDownButton.setOnClickListener(v -> this.scroll.smoothScrollTo(0, this.content.getHeight()));
         int i = 2;
         int i2 = 0;
         Button[] buttonArr = {this.scrollUpButton, this.scrollDownButton};
@@ -696,74 +701,40 @@ public final class MainActivity extends Activity {
             i = 2;
             i2 = 0;
         }
-        FrameLayout.LayoutParams arrowGroupParams = new FrameLayout.LayoutParams(-2, -2, 83);
+        FrameLayout.LayoutParams arrowGroupParams = new FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM | Gravity.LEFT);
         arrowGroupParams.leftMargin = dp(18.0f);
         arrowGroupParams.bottomMargin = dp(18.0f);
         body.addView(this.scrollActions, arrowGroupParams);
-        this.scroll.setOnScrollChangeListener((view, i4, i5, i6, i7) -> MainActivity.this.buildShellStep10(view, i4, i5, i6, i7));
-        this.scroll.addOnLayoutChangeListener((view, i4, i5, i6, i7, i8, i9, i10, i11) -> MainActivity.this.buildShellStep11(view, i4, i5, i6, i7, i8, i9, i10, i11));
+        this.scroll.setOnScrollChangeListener((view, x, y, oldX, oldY) -> refreshScrollControls());
+        this.scroll.addOnLayoutChangeListener((view, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom) -> refreshScrollControls());
         this.createButton = floatingButton("", "");
-        this.createButton.setOnClickListener(view -> MainActivity.this.buildShellStep12(view));
-        FrameLayout.LayoutParams fabParams = new FrameLayout.LayoutParams(-2, -2, 85);
+        this.createButton.setOnClickListener(v -> newChat());
+        FrameLayout.LayoutParams fabParams = new FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM | Gravity.RIGHT);
         fabParams.rightMargin = dp(18.0f);
         fabParams.bottomMargin = dp(18.0f);
         fabParams.height = dp(54.0f);
         body.addView(this.createButton, fabParams);
         this.alphabetRail = new AlphabetRail();
-        FrameLayout.LayoutParams railParams = new FrameLayout.LayoutParams(dp(26.0f), -1, 5);
+        FrameLayout.LayoutParams railParams = new FrameLayout.LayoutParams(dp(26.0f), -1, Gravity.RIGHT);
         railParams.setMargins(0, dp(10.0f), dp(6.0f), dp(84.0f));
         body.addView(this.alphabetRail, railParams);
         this.pullRefreshHint = text("", 13, ink(), true);
-        this.pullRefreshHint.setGravity(17);
+        this.pullRefreshHint.setGravity(Gravity.CENTER);
         this.pullRefreshHint.setPadding(dp(14.0f), dp(8.0f), dp(14.0f), dp(8.0f));
         this.pullRefreshHint.setBackground(card());
         this.pullRefreshHint.setAccessibilityLiveRegion(1);
-        this.pullRefreshHint.setVisibility(8);
-        body.addView(this.pullRefreshHint, new FrameLayout.LayoutParams(-2, -2, 81));
+        this.pullRefreshHint.setVisibility(View.GONE);
+        body.addView(this.pullRefreshHint, new FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL));
         this.compose = column();
         column.addView(this.compose, new LinearLayout.LayoutParams(-1, -2));
         buildFeedSectionTabs(column);
         this.dock = new LinearLayout(this);
-        this.dock.setGravity(16);
+        this.dock.setGravity(Gravity.CENTER_VERTICAL);
         this.dock.setPadding(dp(4.0f), dp(3.0f), dp(4.0f), dp(3.0f));
-        int dockColor = this.dark ? -14408152 : -1446416;
+        int dockColor = this.dark ? 0xFF242628 : 0xFFE9EDF0;
         this.dock.setBackground(barSurface(dockColor, 48));
         column.addView(this.dock, new LinearLayout.LayoutParams(-1, -2));
         buildFeedDrawer(frameLayout, background);
-    }
-
-    public void buildShellStep5(View view, int left, int top, int right, int bottom, int oldLeft, int oldTop, int oldRight, int oldBottom) {
-        view.setSystemGestureExclusionRects(Collections.singletonList(new Rect(0, 0, dp(24.0f), Math.min(bottom - top, dp(200.0f)))));
-    }
-
-    public void buildShellStep6(View v) {
-        showDrawer(true, true);
-    }
-
-    public void buildShellStep7(View v) {
-        if (this.peer != null) {
-            this.calls.call(this.peer);
-        }
-    }
-
-    public void buildShellStep8(View v) {
-        this.scroll.smoothScrollTo(0, 0);
-    }
-
-    public void buildShellStep9(View v) {
-        this.scroll.smoothScrollTo(0, this.content.getHeight());
-    }
-
-    public void buildShellStep10(View view, int x, int y, int oldX, int oldY) {
-        refreshScrollControls();
-    }
-
-    public void buildShellStep11(View view, int left, int top, int right, int bottom, int oldLeft, int oldTop, int oldRight, int oldBottom) {
-        refreshScrollControls();
-    }
-
-    public void buildShellStep12(View v) {
-        newChat();
     }
 
     private Button floatingButton(String label, String description) {
@@ -777,7 +748,7 @@ public final class MainActivity extends Activity {
         action.setPadding(dp(18.0f), 0, dp(18.0f), 0);
         action.setTextColor(onAccent());
         GradientDrawable pill = accentPill(28);
-        action.setBackground(new RippleDrawable(ColorStateList.valueOf(this.dark ? 858796080 : 872415231), pill, null));
+        action.setBackground(new RippleDrawable(ColorStateList.valueOf(this.dark ? 0x33303030 : 0x33FFFFFF), pill, null));
         action.setStateListAnimator(null);
         return action;
     }
@@ -940,7 +911,7 @@ public final class MainActivity extends Activity {
     private void showPullRefreshHint(String message, boolean dismiss) {
         this.handler.removeCallbacks(this.hidePullRefreshHint);
         this.pullRefreshHint.setText(message);
-        this.pullRefreshHint.setVisibility(0);
+        this.pullRefreshHint.setVisibility(View.VISIBLE);
         if (dismiss) {
             this.handler.postDelayed(this.hidePullRefreshHint, 2200L);
         }
@@ -988,7 +959,7 @@ public final class MainActivity extends Activity {
 
     private void addDock(String symbol, String label, boolean selected, final Runnable click) {
         LinearLayout item = column();
-        item.setGravity(17);
+        item.setGravity(Gravity.CENTER);
         item.setPadding(dp(2.0f), dp(2.0f), dp(2.0f), dp(2.0f));
         item.setMinimumHeight(dp(54.0f));
         item.setClickable(true);
@@ -996,17 +967,17 @@ public final class MainActivity extends Activity {
         item.setContentDescription(label);
         item.setSelected(selected);
         int iconColor = selected ? onAccent() : ink();
-        int circleColor = selected ? accent() : this.dark ? -13223620 : -1907998;
+        int circleColor = selected ? accent() : this.dark ? 0xFF36393C : 0xFFE2E2E2;
         GradientDrawable circle = new GradientDrawable();
         circle.setShape(1);
         circle.setColor(circleColor);
         TextView icon = text(symbol, 21, iconColor, true);
-        icon.setGravity(17);
+        icon.setGravity(Gravity.CENTER);
         icon.setBackground(circle);
         icon.setImportantForAccessibility(2);
         TextView name = text(label, 11, selected ? accent() : muted(), selected);
         name.setSingleLine(true);
-        name.setGravity(17);
+        name.setGravity(Gravity.CENTER);
         name.setImportantForAccessibility(2);
         item.addView(icon, new LinearLayout.LayoutParams(dp(34.0f), dp(34.0f)));
         item.addView(name);
@@ -1043,21 +1014,33 @@ public final class MainActivity extends Activity {
             this.createButton.setText("+  " + label);
             this.createButton.setContentDescription(label);
         }
-        this.createButton.setVisibility(showFab ? 0 : 8);
+        this.createButton.setVisibility(showFab ? View.VISIBLE : View.GONE);
         FrameLayout.LayoutParams refreshHintParams = (FrameLayout.LayoutParams) this.pullRefreshHint.getLayoutParams();
         refreshHintParams.bottomMargin = dp(showFab ? 80.0f : 12.0f);
         this.pullRefreshHint.setLayoutParams(refreshHintParams);
         if (!isMainPage() && this.peer == null) {
-            this.pullRefreshHint.setVisibility(8);
+            this.pullRefreshHint.setVisibility(View.GONE);
         }
-        this.scrollActions.setVisibility((showFab && this.page == 0) ? 0 : 8);
-        this.alphabetRail.setVisibility(8);
+        this.scrollActions.setVisibility((showFab && this.page == 0) ? View.VISIBLE : View.GONE);
+        this.alphabetRail.setVisibility(View.GONE);
         int reservedBottom = showFab ? 86 : 12;
         this.content.setPadding(dp(16.0f), dp(12.0f), dp(16.0f), dp(reservedBottom));
-        this.dock.setVisibility(this.peer == null ? 0 : 8);
+        this.dock.setVisibility(this.peer == null ? View.VISIBLE : View.GONE);
         addDock("◉", "Главная", isMainPage(), () -> MainActivity.this.showMainMessages());
-        addDock("⚙", "Настройки", this.page == 2, () -> MainActivity.this.renderStep14());
-        addDock("▶", "Клипы", this.page == 5, () -> MainActivity.this.renderStep15());
+        addDock("⚙", "Настройки", this.page == 2, () -> {
+            this.page = 2;
+            this.peer = null;
+            this.sectionArchive = false;
+            render();
+
+        });
+        addDock("▶", "Клипы", this.page == 5, () -> {
+            this.page = 5;
+            this.peer = null;
+            this.sectionArchive = false;
+            render();
+
+        });
         if (this.peer != null) {
             showConversation();
         } else if (this.page == 2) {
@@ -1082,20 +1065,6 @@ public final class MainActivity extends Activity {
         this.content.animate().alpha(1.0f).setDuration(120L).start();
     }
 
-    public void renderStep14() {
-        this.page = 2;
-        this.peer = null;
-        this.sectionArchive = false;
-        render();
-    }
-
-    public void renderStep15() {
-        this.page = 5;
-        this.peer = null;
-        this.sectionArchive = false;
-        render();
-    }
-
     private LinearLayout newCard() {
         return newCard(this.content);
     }
@@ -1112,7 +1081,7 @@ public final class MainActivity extends Activity {
 
     private TextView allChatsChoice(LinearLayout row, String label, int size, int width, final Runnable select) {
         TextView choice = text(label, size, ink(), true);
-        choice.setGravity(17);
+        choice.setGravity(Gravity.CENTER);
         choice.setSingleLine(true);
         choice.setFocusable(true);
         choice.setOnClickListener(view -> select.run());
@@ -1202,9 +1171,9 @@ public final class MainActivity extends Activity {
 
     private View buildPulseBrand() {
         LinearLayout badge = new LinearLayout(this);
-        badge.setGravity(17);
+        badge.setGravity(Gravity.CENTER);
         badge.setPadding(dp(12.0f), 0, dp(12.0f), 0);
-        badge.setBackground(surface(this.dark ? -14013393 : -920587, 17, surfaceOutline()));
+        badge.setBackground(surface(this.dark ? 0xFF2A2C2F : 0xFFF1F3F5, 17, surfaceOutline()));
         ImageView icon = new ImageView(this);
         icon.setImageResource(R.drawable.ic_pulse_mark);
         icon.setImageTintList(ColorStateList.valueOf(headerInk()));
@@ -1227,10 +1196,19 @@ public final class MainActivity extends Activity {
         this.callFilterStrip.addView(filters, new FrameLayout.LayoutParams(-2, -2));
         for (final CallFilter filter : CallFilter.values()) {
             TextView choice = text(filter.label, 14, ink(), true);
-            choice.setGravity(17);
+            choice.setGravity(Gravity.CENTER);
             choice.setPadding(dp(14.0f), 0, dp(14.0f), 0);
             choice.setFocusable(true);
-            choice.setOnClickListener(view -> MainActivity.this.buildCallFiltersStep17(filter, view));
+            choice.setOnClickListener(v -> {
+                if (this.callFilter == filter) {
+                    return;
+                }
+                this.callFilter = filter;
+                renderCallFilters();
+                showCallHistory();
+                this.scroll.scrollTo(0, 0);
+
+            });
             LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-2, dp(44.0f));
             params.setMarginEnd(dp(6.0f));
             filters.addView(choice, params);
@@ -1239,19 +1217,9 @@ public final class MainActivity extends Activity {
         root.addView(this.callFilterStrip, new LinearLayout.LayoutParams(-1, -2));
     }
 
-    public void buildCallFiltersStep17(CallFilter filter, View v) {
-        if (this.callFilter == filter) {
-            return;
-        }
-        this.callFilter = filter;
-        renderCallFilters();
-        showCallHistory();
-        this.scroll.scrollTo(0, 0);
-    }
-
     private void renderCallFilters() {
         boolean visible = this.page == 7 && this.peer == null;
-        this.callFilterStrip.setVisibility(visible ? 0 : 8);
+        this.callFilterStrip.setVisibility(visible ? View.VISIBLE : View.GONE);
         if (visible) {
             int i = 0;
             while (i < this.callFilterChoices.length) {
@@ -1304,15 +1272,15 @@ public final class MainActivity extends Activity {
     private void renderChatTabs() {
         GradientDrawable surface;
         boolean visible = isMainPage() && this.peer == null;
-        this.feedShortcut.setVisibility(visible ? 0 : 8);
-        this.pulseBrand.setVisibility(visible ? 0 : 8);
+        this.feedShortcut.setVisibility(visible ? View.VISIBLE : View.GONE);
+        this.pulseBrand.setVisibility(visible ? View.VISIBLE : View.GONE);
         boolean selected = this.page == 6;
         this.feedShortcut.setSelected(selected);
         View view = this.feedShortcut;
         if (selected) {
             surface = headerAccentPill();
         } else {
-            surface = surface(this.dark ? -14013393 : -920587, 22, surfaceOutline());
+            surface = surface(this.dark ? 0xFF2A2C2F : 0xFFF1F3F5, 22, surfaceOutline());
         }
         view.setBackground(surface);
         this.feedTabLabel.setTextColor(selected ? onHeaderAccent() : headerInk());
@@ -1350,7 +1318,16 @@ public final class MainActivity extends Activity {
                     final int fromBottom = this.bounds.bottom;
                     this.slide = ValueAnimator.ofFloat(0.0f, 1.0f);
                     this.slide.setDuration(180L);
-                    this.slide.addUpdateListener(valueAnimator -> MainActivity.SlidingTabs.this.moveToStep0(fromLeft, tab, fromRight, fromTop, fromBottom, valueAnimator));
+                    this.slide.addUpdateListener(animation -> {
+                            float progress = animation.getAnimatedFraction();
+                            int left = Math.round((tab.getLeft() - fromLeft) * progress) + fromLeft;
+                            int right = Math.round((tab.getRight() - fromRight) * progress) + fromRight;
+                            int top = Math.round((tab.getTop() - fromTop) * progress) + fromTop;
+                            int bottom = Math.round((tab.getBottom() - fromBottom) * progress) + fromBottom;
+                            this.bounds.set(left, top, right, bottom);
+                            invalidate();
+
+                    });
                     this.slide.start();
                     return;
                 }
@@ -1358,16 +1335,6 @@ public final class MainActivity extends Activity {
                 tab2 = tab;
             }
             slidingTabs.bounds.set(tab2.getLeft(), tab2.getTop(), tab2.getRight(), tab2.getBottom());
-            invalidate();
-        }
-
-        public void moveToStep0(int fromLeft, View tab, int fromRight, int fromTop, int fromBottom, ValueAnimator animation) {
-            float progress = animation.getAnimatedFraction();
-            int left = Math.round((tab.getLeft() - fromLeft) * progress) + fromLeft;
-            int right = Math.round((tab.getRight() - fromRight) * progress) + fromRight;
-            int top = Math.round((tab.getTop() - fromTop) * progress) + fromTop;
-            int bottom = Math.round((tab.getBottom() - fromBottom) * progress) + fromBottom;
-            this.bounds.set(left, top, right, bottom);
             invalidate();
         }
 
@@ -1390,21 +1357,21 @@ public final class MainActivity extends Activity {
             this.targets = new View[LABELS.length()];
             this.letters = new TextView[LABELS.length()];
             this.lastIndex = -1;
-            setOrientation(1);
+            setOrientation(LinearLayout.VERTICAL);
             setPadding(0, MainActivity.this.dp(4.0f), 0, MainActivity.this.dp(4.0f));
             setContentDescription("Алфавитная прокрутка");
             for (int i = 0; i < LABELS.length(); i++) {
                 final int index = i;
                 TextView letter = MainActivity.this.text("•", 9, MainActivity.this.ink(), true);
                 letter.setContentDescription(String.valueOf(LABELS.charAt(i)));
-                letter.setGravity(17);
-                letter.setOnClickListener(view -> MainActivity.AlphabetRail.this.newStep0(index, view));
+                letter.setGravity(Gravity.CENTER);
+                letter.setOnClickListener(view -> MainActivity.AlphabetRail.this.jumpToLetter(index, view));
                 this.letters[i] = letter;
                 addView(letter, new LinearLayout.LayoutParams(-1, 0, 1.0f));
             }
         }
 
-        public void newStep0(int index, View view) {
+        public void jumpToLetter(int index, View view) {
             jumpTo(index);
         }
 
@@ -1489,25 +1456,25 @@ public final class MainActivity extends Activity {
     private void buildFeedDrawer(FrameLayout windowContent, int background) {
         this.feedOverlay = new FrameLayout(this);
         this.feedOverlay.setBackgroundColor(Integer.MIN_VALUE);
-        this.feedOverlay.setOnClickListener(view -> MainActivity.this.buildFeedDrawerStep18(view));
-        this.feedOverlay.setVisibility(8);
+        this.feedOverlay.setOnClickListener(v -> hideFeedDrawer());
+        this.feedOverlay.setVisibility(View.GONE);
         windowContent.addView(this.feedOverlay, new FrameLayout.LayoutParams(-1, -1));
         this.feedPanel = column();
         this.feedPanel.setClickable(true);
         this.feedPanel.setBackgroundColor(background);
-        FrameLayout.LayoutParams panelParams = new FrameLayout.LayoutParams(-1, -1, 3);
+        FrameLayout.LayoutParams panelParams = new FrameLayout.LayoutParams(-1, -1, Gravity.LEFT);
         panelParams.rightMargin = dp(24.0f);
         this.feedOverlay.addView(this.feedPanel, panelParams);
         this.feedHeader = new LinearLayout(this);
-        this.feedHeader.setGravity(16);
+        this.feedHeader.setGravity(Gravity.CENTER_VERTICAL);
         this.feedHeader.setPadding(dp(12.0f), dp(12.0f), dp(12.0f), dp(12.0f));
         this.feedHeader.setBackground(headerSurface());
         this.feedPanel.addView(this.feedHeader, new LinearLayout.LayoutParams(-1, -2));
         this.drawerTitle = text("Лента", 20, headerInk(), true);
-        this.drawerTitle.setGravity(17);
+        this.drawerTitle.setGravity(Gravity.CENTER);
         this.feedHeader.addView(this.drawerTitle, new LinearLayout.LayoutParams(0, -2, 1.0f));
         this.drawerClose = headerControl("×");
-        this.drawerClose.setOnClickListener(view -> MainActivity.this.buildFeedDrawerStep19(view));
+        this.drawerClose.setOnClickListener(v -> hideFeedDrawer());
         this.feedHeader.addView(this.drawerClose, new LinearLayout.LayoutParams(dp(40.0f), dp(40.0f)));
         buildNotificationTabs();
         ScrollView feedScroll = new ScrollView(this);
@@ -1515,14 +1482,6 @@ public final class MainActivity extends Activity {
         this.feedContent = column();
         this.feedContent.setPadding(dp(16.0f), dp(12.0f), dp(16.0f), dp(12.0f));
         feedScroll.addView(this.feedContent, new FrameLayout.LayoutParams(-1, -2));
-    }
-
-    public void buildFeedDrawerStep18(View v) {
-        hideFeedDrawer();
-    }
-
-    public void buildFeedDrawerStep19(View v) {
-        hideFeedDrawer();
     }
 
     private void buildNotificationTabs() {
@@ -1533,23 +1492,14 @@ public final class MainActivity extends Activity {
         LinearLayout row = new LinearLayout(this);
         row.setPadding(dp(3.0f), dp(3.0f), dp(3.0f), dp(3.0f));
         this.notificationTabs.addView(row, new FrameLayout.LayoutParams(-1, -2));
-        this.alertsChoice = allChatsChoice(row, "Уведомления", 13, 0, () -> MainActivity.this.buildNotificationTabsStep20());
-        this.eventsChoice = allChatsChoice(row, "События", 13, 0, () -> MainActivity.this.buildNotificationTabsStep21());
-        row.addOnLayoutChangeListener((view, i, i2, i3, i4, i5, i6, i7, i8) -> MainActivity.this.buildNotificationTabsStep22(view, i, i2, i3, i4, i5, i6, i7, i8));
-    }
+        this.alertsChoice = allChatsChoice(row, "Уведомления", 13, 0, () -> selectNotificationTab(false));
+        this.eventsChoice = allChatsChoice(row, "События", 13, 0, () -> selectNotificationTab(true));
+        row.addOnLayoutChangeListener((view, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom) -> {
+            if (right - left != oldRight - oldLeft) {
+                this.notificationTabs.moveTo(this.eventsSelected ? this.eventsChoice : this.alertsChoice, false);
+            }
 
-    public void buildNotificationTabsStep20() {
-        selectNotificationTab(false);
-    }
-
-    public void buildNotificationTabsStep21() {
-        selectNotificationTab(true);
-    }
-
-    public void buildNotificationTabsStep22(View view, int left, int top, int right, int bottom, int oldLeft, int oldTop, int oldRight, int oldBottom) {
-        if (right - left != oldRight - oldLeft) {
-            this.notificationTabs.moveTo(this.eventsSelected ? this.eventsChoice : this.alertsChoice, false);
-        }
+        });
     }
 
     private void selectNotificationTab(boolean events) {
@@ -1568,7 +1518,7 @@ public final class MainActivity extends Activity {
     private void showDrawer(boolean notifications, boolean animate) {
         this.notificationDrawer = notifications;
         this.feedOpen = true;
-        this.feedOverlay.setVisibility(0);
+        this.feedOverlay.setVisibility(View.VISIBLE);
         ((ViewGroup) this.feedOverlay.getParent()).getChildAt(0).setImportantForAccessibility(4);
         renderFeedDrawer();
         this.feedPanel.animate().cancel();
@@ -1584,24 +1534,23 @@ public final class MainActivity extends Activity {
         if (this.feedOpen) {
             this.feedOpen = false;
             this.feedPanel.animate().cancel();
-            this.feedPanel.animate().translationX(-this.feedPanel.getWidth()).setDuration(170L).withEndAction(() -> MainActivity.this.hideFeedDrawerStep23()).start();
-        }
-    }
+            this.feedPanel.animate().translationX(-this.feedPanel.getWidth()).setDuration(170L).withEndAction(() -> {
+                if (!this.feedOpen) {
+                    this.feedOverlay.setVisibility(View.GONE);
+                    if (this.peer != null) {
+                        refreshMessages();
+                    }
+                    ((ViewGroup) this.feedOverlay.getParent()).getChildAt(0).setImportantForAccessibility(0);
+                }
 
-    public void hideFeedDrawerStep23() {
-        if (!this.feedOpen) {
-            this.feedOverlay.setVisibility(8);
-            if (this.peer != null) {
-                refreshMessages();
-            }
-            ((ViewGroup) this.feedOverlay.getParent()).getChildAt(0).setImportantForAccessibility(0);
+            }).start();
         }
     }
 
     private void renderFeedDrawer() {
         this.drawerTitle.setText(this.notificationDrawer ? "Центр уведомлений" : "Лента");
         this.drawerClose.setContentDescription(this.notificationDrawer ? "Закрыть центр уведомлений" : "Закрыть ленту");
-        this.notificationTabs.setVisibility(this.notificationDrawer ? 0 : 8);
+        this.notificationTabs.setVisibility(this.notificationDrawer ? View.VISIBLE : View.GONE);
         this.feedContent.removeAllViews();
         if (!this.notificationDrawer) {
             showStories(this.feedContent);
@@ -1831,7 +1780,7 @@ public final class MainActivity extends Activity {
         this.feedSectionViewport = new HorizontalScrollView(this);
         this.feedSectionViewport.setHorizontalScrollBarEnabled(false);
         this.feedSectionViewport.setFillViewport(true);
-        this.feedSectionViewport.setBackground(surface(this.dark ? -14408152 : -1446416, 24, surfaceOutline()));
+        this.feedSectionViewport.setBackground(surface(this.dark ? 0xFF242628 : 0xFFE9EDF0, 24, surfaceOutline()));
         this.feedSectionViewport.setClipToOutline(true);
         this.feedSectionTabs = new SlidingTabs(accentPill(22));
         this.feedSectionViewport.addView(this.feedSectionTabs, new FrameLayout.LayoutParams(-2, -2));
@@ -1840,7 +1789,7 @@ public final class MainActivity extends Activity {
         root.addView(this.feedSectionViewport, params);
         LinearLayout row = new LinearLayout(this);
         row.setPadding(dp(3.0f), dp(3.0f), dp(3.0f), dp(3.0f));
-        row.setGravity(1);
+        row.setGravity(Gravity.CENTER_HORIZONTAL);
         this.feedSectionTabs.addView(row, new FrameLayout.LayoutParams(-1, -2));
         for (int i = 0; i < FEED_SECTIONS.length; i++) {
             final int index = i;
@@ -1851,21 +1800,16 @@ public final class MainActivity extends Activity {
             choice.setContentDescription(FEED_SECTIONS[i]);
             choice.setTooltipText(FEED_SECTIONS[i]);
             choice.setFocusable(true);
-            choice.setOnClickListener(view -> MainActivity.this.buildFeedSectionTabsStep24(index, view));
+            choice.setOnClickListener(v -> selectFeedSection(index));
             row.addView(choice, new LinearLayout.LayoutParams(dp(44.0f), dp(46.0f)));
             this.feedSectionChoices[i] = choice;
         }
-        row.addOnLayoutChangeListener((view, i2, i3, i4, i5, i6, i7, i8, i9) -> MainActivity.this.buildFeedSectionTabsStep25(view, i2, i3, i4, i5, i6, i7, i8, i9));
-    }
+        row.addOnLayoutChangeListener((view, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom) -> {
+            if (this.feedSectionTabs.isShown() && right - left != oldRight - oldLeft) {
+                this.feedSectionTabs.moveTo(this.feedSectionChoices[activeFeedSection()], false);
+            }
 
-    public void buildFeedSectionTabsStep24(int index, View v) {
-        selectFeedSection(index);
-    }
-
-    public void buildFeedSectionTabsStep25(View view, int left, int top, int right, int bottom, int oldLeft, int oldTop, int oldRight, int oldBottom) {
-        if (this.feedSectionTabs.isShown() && right - left != oldRight - oldLeft) {
-            this.feedSectionTabs.moveTo(this.feedSectionChoices[activeFeedSection()], false);
-        }
+        });
     }
 
     private int activeFeedSection() {
@@ -1899,8 +1843,8 @@ public final class MainActivity extends Activity {
 
     private void renderFeedSectionTabs() {
         boolean visible = this.peer == null && isMainPage();
-        boolean wasVisible = this.feedSectionViewport.getVisibility() == 0;
-        this.feedSectionViewport.setVisibility(visible ? 0 : 8);
+        boolean wasVisible = this.feedSectionViewport.getVisibility() == View.VISIBLE;
+        this.feedSectionViewport.setVisibility(visible ? View.VISIBLE : View.GONE);
         if (visible) {
             final int active = activeFeedSection();
             int i = 0;
@@ -1912,18 +1856,17 @@ public final class MainActivity extends Activity {
             }
             final View selected = this.feedSectionChoices[active];
             this.feedSectionTabs.moveTo(selected, wasVisible);
-            this.feedSectionViewport.post(() -> MainActivity.this.renderFeedSectionTabsStep26(active, selected));
-        }
-    }
+            this.feedSectionViewport.post(() -> {
+                if (!this.feedSectionViewport.isShown() || activeFeedSection() != active) {
+                    return;
+                }
+                int left = this.feedSectionViewport.getScrollX();
+                int width = this.feedSectionViewport.getWidth();
+                if (selected.getLeft() < left || selected.getRight() > left + width) {
+                    this.feedSectionViewport.smoothScrollTo(selected.getLeft() - ((width - selected.getWidth()) / 2), 0);
+                }
 
-    public void renderFeedSectionTabsStep26(int active, View selected) {
-        if (!this.feedSectionViewport.isShown() || activeFeedSection() != active) {
-            return;
-        }
-        int left = this.feedSectionViewport.getScrollX();
-        int width = this.feedSectionViewport.getWidth();
-        if (selected.getLeft() < left || selected.getRight() > left + width) {
-            this.feedSectionViewport.smoothScrollTo(selected.getLeft() - ((width - selected.getWidth()) / 2), 0);
+            });
         }
     }
 
@@ -1936,7 +1879,14 @@ public final class MainActivity extends Activity {
         for (int i = 0; i < PROFILE_SECTIONS.length; i++) {
             final int section = i;
             boolean selected = this.feedSection == section;
-            TextView choice = allChatsChoice(sections, PROFILE_SECTIONS[i], 13, 0, () -> MainActivity.this.showFeedPageStep27(section));
+            TextView choice = allChatsChoice(sections, PROFILE_SECTIONS[i], 13, 0, () -> {
+                if (this.feedSection == section) {
+                    return;
+                }
+                this.feedSection = section;
+                render();
+
+            });
             choice.setSelected(selected);
             choice.setTextColor(selected ? onAccent() : ink());
             choice.setPadding(dp(4.0f), 0, dp(4.0f), 0);
@@ -1952,19 +1902,11 @@ public final class MainActivity extends Activity {
         banner.addView(empty, result);
     }
 
-    public void showFeedPageStep27(int section) {
-        if (this.feedSection == section) {
-            return;
-        }
-        this.feedSection = section;
-        render();
-    }
-
     private LinearLayout showMyWall(LinearLayout parent) {
         final String key = wallProfileKey();
         LinearLayout newCard = newCard(parent);
         LinearLayout details = new LinearLayout(this);
-        details.setGravity(48);
+        details.setGravity(Gravity.TOP);
         newCard.addView(details, new LinearLayout.LayoutParams(-1, -2));
         FrameLayout photo = new FrameLayout(this);
         photo.setBackground(accentPill(18));
@@ -1972,7 +1914,7 @@ public final class MainActivity extends Activity {
         showProfilePhoto(photo, key, "♙", 36, onAccent());
         photo.setContentDescription("Выбрать фото профиля");
         photo.setFocusable(true);
-        photo.setOnClickListener(view -> MainActivity.this.showMyWallStep28(key, view));
+        photo.setOnClickListener(v -> pickProfilePhoto(key));
         details.addView(photo, new LinearLayout.LayoutParams(dp(96.0f), dp(116.0f)));
         LinearLayout fields = column();
         LinearLayout.LayoutParams fieldParams = new LinearLayout.LayoutParams(0, -2, 1.0f);
@@ -1985,33 +1927,42 @@ public final class MainActivity extends Activity {
         edit.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
         edit.setImageTintList(ColorStateList.valueOf(ink()));
         edit.setPadding(dp(11.0f), dp(11.0f), dp(11.0f), dp(11.0f));
-        edit.setBackground(new RippleDrawable(ColorStateList.valueOf(this.dark ? 872415231 : 570425344), surface(0, 16, surfaceOutline()), null));
+        edit.setBackground(new RippleDrawable(ColorStateList.valueOf(this.dark ? 0x33FFFFFF : 0x22000000), surface(0, 16, surfaceOutline()), null));
         edit.setContentDescription("Редактировать профиль");
         edit.setTooltipText("Редактировать профиль");
         edit.setFocusable(true);
-        edit.setOnClickListener(view -> MainActivity.this.showMyWallStep29(key, view));
+        edit.setOnClickListener(v -> editWallProfile(key));
         LinearLayout.LayoutParams editParams = new LinearLayout.LayoutParams(dp(44.0f), dp(44.0f));
         editParams.setMarginStart(dp(6.0f));
         details.addView(edit, editParams);
         return newCard;
     }
 
-    public void showMyWallStep28(String key, View v) {
-        pickProfilePhoto(key);
-    }
-
-    public void showMyWallStep29(String key, View v) {
-        editWallProfile(key);
-    }
+    /** Декодированные аватарки: раньше каждую заново распаковывали из base64 при каждой перерисовке списка. */
+    private final android.util.LruCache<String, Bitmap> photoCache = new android.util.LruCache<String, Bitmap>(4 * 1024 * 1024) {
+        @Override
+        protected int sizeOf(String key, Bitmap value) {
+            return value.getByteCount();
+        }
+    };
 
     private Bitmap loadProfilePhoto(String key) {
         String encoded = this.preferences.getString(key + "photo", "");
         if (encoded.isEmpty()) {
             return null;
         }
+        String cacheKey = key + "#" + encoded.length() + ":" + encoded.hashCode();
+        Bitmap cached = this.photoCache.get(cacheKey);
+        if (cached != null) {
+            return cached;
+        }
         try {
-            byte[] data = Base64.decode(encoded, 0);
-            return BitmapFactory.decodeByteArray(data, 0, data.length);
+            byte[] data = Base64.decode(encoded, Base64.DEFAULT);
+            Bitmap bitmap = BitmapFactory.decodeByteArray(data, 0, data.length);
+            if (bitmap != null) {
+                this.photoCache.put(cacheKey, bitmap);
+            }
+            return bitmap;
         } catch (IllegalArgumentException e) {
             return null;
         }
@@ -2028,7 +1979,7 @@ public final class MainActivity extends Activity {
             return;
         }
         TextView placeholder = text(fallback, placeholderSize, placeholderColor, true);
-        placeholder.setGravity(17);
+        placeholder.setGravity(Gravity.CENTER);
         frame.addView(placeholder, new FrameLayout.LayoutParams(-1, -1));
     }
 
@@ -2055,23 +2006,18 @@ public final class MainActivity extends Activity {
         form.addView(email);
         form.addView(phone);
         final AlertDialog dialog = new AlertDialog.Builder(this).setTitle("Профиль").setView(form).setNegativeButton("Отмена", (DialogInterface.OnClickListener) null).setPositiveButton("Сохранить", (DialogInterface.OnClickListener) null).create();
-        dialog.setOnShowListener(dialogInterface -> MainActivity.this.editWallProfileStep31(dialog, email, key, name, phone, dialogInterface));
+        dialog.setOnShowListener(ignored -> dialog.getButton(-1).setOnClickListener(v -> {
+            String address = email.getText().toString().trim();
+            if (!address.isEmpty() && !Patterns.EMAIL_ADDRESS.matcher(address).matches()) {
+                email.setError("Проверьте адрес почты");
+                return;
+            }
+            this.preferences.edit().putString(key + "name", name.getText().toString().trim()).putString(key + "email", address).putString(key + "phone", phone.getText().toString().trim()).apply();
+            dialog.dismiss();
+            refreshWall();
+
+        }));
         showDialog(dialog);
-    }
-
-    public void editWallProfileStep31(final AlertDialog dialog, final EditText email, final String key, final EditText name, final EditText phone, DialogInterface ignored) {
-        dialog.getButton(-1).setOnClickListener(view -> MainActivity.this.editWallProfileStep30(email, key, name, phone, dialog, view));
-    }
-
-    public void editWallProfileStep30(EditText email, String key, EditText name, EditText phone, AlertDialog dialog, View v) {
-        String address = email.getText().toString().trim();
-        if (!address.isEmpty() && !Patterns.EMAIL_ADDRESS.matcher(address).matches()) {
-            email.setError("Проверьте адрес почты");
-            return;
-        }
-        this.preferences.edit().putString(key + "name", name.getText().toString().trim()).putString(key + "email", address).putString(key + "phone", phone.getText().toString().trim()).apply();
-        dialog.dismiss();
-        refreshWall();
     }
 
     private void pickProfilePhoto(String key) {
@@ -2081,61 +2027,59 @@ public final class MainActivity extends Activity {
             startActivityForResult(picker, 42);
         } catch (ActivityNotFoundException e) {
             this.photoProfileKey = null;
-            Toast.makeText(this, "Выбор фото недоступен", 0).show();
+            Toast.makeText(this, "Выбор фото недоступен", Toast.LENGTH_SHORT).show();
         }
     }
 
     private void saveProfilePhoto(final Uri uri, final String key) {
-        this.worker.execute(() -> MainActivity.this.saveProfilePhotoStep34(uri, key));
-    }
-
-    public void saveProfilePhotoStep34(Uri uri, final String key) {
-        try {
-            BitmapFactory.Options options = new BitmapFactory.Options();
-            options.inJustDecodeBounds = true;
-            try (InputStream input = getContentResolver().openInputStream(uri)) {
-                BitmapFactory.decodeStream(input, null, options);
-            }
-            if (options.outWidth <= 0 || options.outHeight <= 0) {
-                throw new IOException("Invalid photo");
-            }
-            options.inJustDecodeBounds = false;
-            options.inSampleSize = 1;
-            while (Math.max(options.outWidth, options.outHeight) / options.inSampleSize > 384) {
-                options.inSampleSize *= 2;
-            }
-            try (InputStream input = getContentResolver().openInputStream(uri); ByteArrayOutputStream output = new ByteArrayOutputStream()) {
-                Bitmap bitmap = BitmapFactory.decodeStream(input, null, options);
-                if (bitmap == null) {
-                    throw new IOException("Could not decode photo");
+        this.worker.execute(() -> {
+            try {
+                BitmapFactory.Options options = new BitmapFactory.Options();
+                options.inJustDecodeBounds = true;
+                try (InputStream input = getContentResolver().openInputStream(uri)) {
+                    BitmapFactory.decodeStream(input, null, options);
                 }
-                boolean saved = bitmap.compress(Bitmap.CompressFormat.JPEG, 85, output);
-                bitmap.recycle();
-                if (!saved) {
-                    throw new IOException("Could not save photo");
+                if (options.outWidth <= 0 || options.outHeight <= 0) {
+                    throw new IOException("Invalid photo");
                 }
-                this.preferences.edit().putString(key + "photo", Base64.encodeToString(output.toByteArray(), Base64.NO_WRAP)).apply();
+                options.inJustDecodeBounds = false;
+                options.inSampleSize = 1;
+                while (Math.max(options.outWidth, options.outHeight) / options.inSampleSize > 384) {
+                    options.inSampleSize *= 2;
+                }
+                try (InputStream input = getContentResolver().openInputStream(uri); ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+                    Bitmap bitmap = BitmapFactory.decodeStream(input, null, options);
+                    if (bitmap == null) {
+                        throw new IOException("Could not decode photo");
+                    }
+                    boolean saved = bitmap.compress(Bitmap.CompressFormat.JPEG, 85, output);
+                    bitmap.recycle();
+                    if (!saved) {
+                        throw new IOException("Could not save photo");
+                    }
+                    this.preferences.edit().putString(key + "photo", Base64.encodeToString(output.toByteArray(), Base64.NO_WRAP)).apply();
+                }
+                this.handler.post(() -> {
+                    if (isDestroyed()) {
+                        return;
+                    }
+                    if (key.equals(wallProfileKey())) {
+                        refreshWall();
+                    } else if (this.page == 0 || this.page == 1) {
+                        refreshChats();
+                    }
+
+                });
+            } catch (IOException | SecurityException e) {
+                this.handler.post(this::onProfilePhotoFailed);
             }
-            this.handler.post(() -> saveProfilePhotoStep32(key));
-        } catch (IOException | SecurityException e) {
-            this.handler.post(this::saveProfilePhotoStep33);
-        }
+
+        });
     }
 
-    public void saveProfilePhotoStep32(String key) {
-        if (isDestroyed()) {
-            return;
-        }
-        if (key.equals(wallProfileKey())) {
-            refreshWall();
-        } else if (this.page == 0 || this.page == 1) {
-            refreshChats();
-        }
-    }
-
-    public void saveProfilePhotoStep33() {
+    public void onProfilePhotoFailed() {
         if (!isDestroyed()) {
-            Toast.makeText(this, "Не удалось открыть фото", 1).show();
+            Toast.makeText(this, "Не удалось открыть фото", Toast.LENGTH_LONG).show();
         }
     }
 
@@ -2144,13 +2088,13 @@ public final class MainActivity extends Activity {
         boolean hasChatRows = chatList && this.list.getChildCount() > 0 && (this.list.getChildAt(0).getTag() instanceof String);
         boolean canMoveUp = hasChatRows && this.scroll.canScrollVertically(-1);
         boolean canMoveDown = hasChatRows && this.scroll.canScrollVertically(1);
-        this.scrollUpButton.setVisibility((this.page == 0 && canMoveUp) ? 0 : 8);
-        this.scrollDownButton.setVisibility((this.page == 0 && canMoveDown) ? 0 : 8);
+        this.scrollUpButton.setVisibility((this.page == 0 && canMoveUp) ? View.VISIBLE : View.GONE);
+        this.scrollDownButton.setVisibility((this.page == 0 && canMoveDown) ? View.VISIBLE : View.GONE);
         if (this.alphabetRail == null) {
             return;
         }
         boolean showRail = chatList && this.list.getHeight() > this.scroll.getHeight() - this.content.getPaddingTop() && this.scroll.getHeight() > 0;
-        this.alphabetRail.setVisibility(showRail ? 0 : 8);
+        this.alphabetRail.setVisibility(showRail ? View.VISIBLE : View.GONE);
         int rightPadding = dp(showRail ? 40.0f : 16.0f);
         if (this.content.getPaddingRight() != rightPadding) {
             this.content.setPadding(this.content.getPaddingLeft(), this.content.getPaddingTop(), rightPadding, this.content.getPaddingBottom());
@@ -2168,9 +2112,9 @@ public final class MainActivity extends Activity {
         linearLayout.setMinimumHeight(dp(180.0f));
         this.content.addView(linearLayout, new LinearLayout.LayoutParams(-1, -2));
         LinearLayout rail = column();
-        rail.setGravity(49);
+        rail.setGravity(Gravity.TOP | Gravity.CENTER_HORIZONTAL);
         rail.setPadding(0, dp(8.0f), 0, dp(8.0f));
-        rail.setBackground(surface(this.dark ? -14539738 : -1643794, 18, surfaceOutline()));
+        rail.setBackground(surface(this.dark ? 0xFF222426 : 0xFFE6EAEE, 18, surfaceOutline()));
         LinearLayout.LayoutParams railParams = new LinearLayout.LayoutParams(dp(54.0f), -1);
         railParams.setMarginEnd(dp(10.0f));
         linearLayout.addView(rail, railParams);
@@ -2183,22 +2127,17 @@ public final class MainActivity extends Activity {
         all.setTooltipText("Все сообщества");
         all.setSelected(!this.sectionArchive);
         all.setFocusable(true);
-        all.setOnClickListener(view -> MainActivity.this.showCommunitiesStep35(view));
+        all.setOnClickListener(v -> {
+            if (this.sectionArchive) {
+                setSectionArchive(false);
+            }
+
+        });
         rail.addView(all, new LinearLayout.LayoutParams(dp(42.0f), dp(42.0f)));
         LinearLayout pane = column();
         linearLayout.addView(pane, new LinearLayout.LayoutParams(0, -2, 1.0f));
-        addArchiveRow(pane, this.sectionArchive, "К сообществам", () -> MainActivity.this.showCommunitiesStep36());
+        addArchiveRow(pane, this.sectionArchive, "К сообществам", () -> setSectionArchive(!this.sectionArchive));
         newCard(pane).addView(text(this.sectionArchive ? "В архиве пока нет сообществ." : "Сообществ пока нет.", 15, muted(), false));
-    }
-
-    public void showCommunitiesStep35(View v) {
-        if (this.sectionArchive) {
-            setSectionArchive(false);
-        }
-    }
-
-    public void showCommunitiesStep36() {
-        setSectionArchive(!this.sectionArchive);
     }
 
     private void addArchiveRow(boolean open, String backLabel, Runnable action) {
@@ -2207,7 +2146,7 @@ public final class MainActivity extends Activity {
 
     private void addArchiveRow(LinearLayout parent, boolean open, String backLabel, final Runnable action) {
         Button archive = button(open ? "‹  " + backLabel : "Архив", false);
-        archive.setGravity(8388627);
+        archive.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
         archive.setPadding(dp(16.0f), 0, dp(16.0f), 0);
         archive.setOnClickListener(view -> action.run());
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, dp(48.0f));
@@ -2215,32 +2154,20 @@ public final class MainActivity extends Activity {
         parent.addView(archive, params);
     }
 
-    public void showSectionWithArchiveStep38() {
-        setSectionArchive(!this.sectionArchive);
-    }
-
     private void showSectionWithArchive(String backLabel, String empty, String archiveEmpty) {
-        addArchiveRow(this.sectionArchive, backLabel, () -> MainActivity.this.showSectionWithArchiveStep38());
+        addArchiveRow(this.sectionArchive, backLabel, () -> setSectionArchive(!this.sectionArchive));
         newCard().addView(text(this.sectionArchive ? archiveEmpty : empty, 15, muted(), false));
     }
 
     private void showChats() {
         if (this.page == 0) {
             final boolean archived = this.chatFilter == 2;
-            addArchiveRow(archived, "К чатам", () -> MainActivity.this.showChatsStep39(archived));
+            addArchiveRow(archived, "К чатам", () -> selectHeaderFilter(archived ? 0 : 2));
         }
         this.list = column();
         this.content.addView(this.list, new LinearLayout.LayoutParams(-1, -2));
-        this.list.addOnLayoutChangeListener((view, i, i2, i3, i4, i5, i6, i7, i8) -> MainActivity.this.showChatsStep40(view, i, i2, i3, i4, i5, i6, i7, i8));
+        this.list.addOnLayoutChangeListener((view, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom) -> refreshScrollControls());
         refreshChats();
-    }
-
-    public void showChatsStep39(boolean archived) {
-        selectHeaderFilter(archived ? 0 : 2);
-    }
-
-    public void showChatsStep40(View view, int left, int top, int right, int bottom, int oldLeft, int oldTop, int oldRight, int oldBottom) {
-        refreshScrollControls();
     }
 
     private void refreshChats() {
@@ -2276,23 +2203,28 @@ public final class MainActivity extends Activity {
         Map<String, ChatStore.Message> latest = this.page == 0 ? this.store.latestMessages(owner(), user()) : Collections.emptyMap();
         for (final String name : names) {
             LinearLayout linearLayout = new LinearLayout(this);
-            linearLayout.setGravity(16);
+            linearLayout.setGravity(Gravity.CENTER_VERTICAL);
             linearLayout.setBackground(card());
             linearLayout.setClipToOutline(z2);
             ChatStore.Message preview = latest.get(name);
             LinearLayout linearLayout2 = new LinearLayout(this);
-            linearLayout2.setGravity(16);
+            linearLayout2.setGravity(Gravity.CENTER_VERTICAL);
             linearLayout2.setPadding(dp(12.0f), 0, dp(f), 0);
             linearLayout2.setFocusable(z2);
-            linearLayout2.setOnClickListener(view -> MainActivity.this.refreshChatsStep41(name, view));
+            linearLayout2.setOnClickListener(v -> {
+                this.peer = name;
+                this.page = 0;
+                render();
+
+            });
             LinearLayout.LayoutParams avatarParams = new LinearLayout.LayoutParams(dp(36.0f), dp(36.0f));
             avatarParams.setMarginEnd(dp(10.0f));
             linearLayout2.addView(chatAvatar(name), avatarParams);
             LinearLayout column = column();
-            column.setGravity(16);
+            column.setGravity(Gravity.CENTER_VERTICAL);
             linearLayout2.addView(column, new LinearLayout.LayoutParams(0, -1, 1.0f));
             LinearLayout linearLayout3 = new LinearLayout(this);
-            linearLayout3.setGravity(16);
+            linearLayout3.setGravity(Gravity.CENTER_VERTICAL);
             TextView title = text(name, 16, ink(), preview != null);
             title.setSingleLine(true);
             title.setEllipsize(TextUtils.TruncateAt.END);
@@ -2322,12 +2254,16 @@ public final class MainActivity extends Activity {
             if (this.page == 0) {
                 TextView read = chatRowAction("✓", 18);
                 read.setContentDescription("Отметить прочитанным: " + name);
-                read.setOnClickListener(view -> MainActivity.this.refreshChatsStep42(name, view));
+                read.setOnClickListener(v -> {
+                    this.store.markRead(owner(), user(), name, this.store.cursor(owner()));
+                    refreshChats();
+
+                });
                 linearLayout.addView(read, new LinearLayout.LayoutParams(dp(44.0f), -1));
             }
             TextView actions = chatRowAction("⋯", 20);
             actions.setContentDescription("Действия чата " + name);
-            actions.setOnClickListener(view -> MainActivity.this.refreshChatsStep43(name, view));
+            actions.setOnClickListener(v -> chatActions(name));
             linearLayout.addView(actions, new LinearLayout.LayoutParams(dp(48.0f), -1));
             LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, dp(preview == null ? 56.0f : 68.0f));
             params.bottomMargin = dp(8.0f);
@@ -2346,21 +2282,6 @@ public final class MainActivity extends Activity {
             f = 8.0f;
         }
         this.alphabetRail.bind(this.list, names);
-    }
-
-    public void refreshChatsStep41(String name, View v) {
-        this.peer = name;
-        this.page = 0;
-        render();
-    }
-
-    public void refreshChatsStep42(String name, View v) {
-        this.store.markRead(owner(), user(), name, this.store.cursor(owner()));
-        refreshChats();
-    }
-
-    public void refreshChatsStep43(String name, View v) {
-        chatActions(name);
     }
 
     private void revealChatArchive(String name, boolean onRight) {
@@ -2405,7 +2326,12 @@ public final class MainActivity extends Activity {
         archive.setContentDescription(sb.append(str).append(name).toString());
         archive.setMinWidth(0);
         archive.setMinimumWidth(0);
-        archive.setOnClickListener(view -> MainActivity.this.showArchiveActionStep44(name, archived, view));
+        archive.setOnClickListener(v -> {
+            this.store.setArchived(owner(), name, !archived);
+            this.revealedChat = null;
+            refreshChats();
+
+        });
         int width = dp(104.0f);
         frame.addView(archive, 0, new FrameLayout.LayoutParams(width, -1, onRight ? 5 : 3));
         int offset = onRight ? -width : width;
@@ -2416,12 +2342,6 @@ public final class MainActivity extends Activity {
         }
     }
 
-    public void showArchiveActionStep44(String name, boolean archived, View v) {
-        this.store.setArchived(owner(), name, !archived);
-        this.revealedChat = null;
-        refreshChats();
-    }
-
     private String chatAvatarKey(String name) {
         return "chat.avatar/" + Uri.encode(owner()) + "/" + Uri.encode(name) + "/";
     }
@@ -2430,13 +2350,13 @@ public final class MainActivity extends Activity {
         FrameLayout avatar = new FrameLayout(this);
         GradientDrawable surface = new GradientDrawable();
         surface.setShape(1);
-        surface.setColor(this.dark ? -13223620 : -2301208);
+        surface.setColor(this.dark ? 0xFF36393C : 0xFFDCE2E8);
         avatar.setBackground(surface);
         avatar.setClipToOutline(true);
         GradientDrawable ring = new GradientDrawable();
         ring.setShape(1);
         ring.setColor(0);
-        ring.setStroke(dp(1.0f), (ink() & 0xFFFFFF) | (-1409286144));
+        ring.setStroke(dp(1.0f), (ink() & 0xFFFFFF) | (0xAC000000));
         avatar.setForeground(ring);
         avatar.setImportantForAccessibility(4);
         return avatar;
@@ -2452,9 +2372,9 @@ public final class MainActivity extends Activity {
 
     private TextView chatRowAction(String label, int size) {
         TextView action = text(label, size, ink(), false);
-        action.setGravity(17);
+        action.setGravity(Gravity.CENTER);
         action.setFocusable(true);
-        action.setBackground(new RippleDrawable(ColorStateList.valueOf(this.dark ? 872415231 : 640692272), null, new ColorDrawable(-1)));
+        action.setBackground(new RippleDrawable(ColorStateList.valueOf(this.dark ? 0x33FFFFFF : 0x26303030), null, new ColorDrawable(-1)));
         return action;
     }
 
@@ -2471,7 +2391,7 @@ public final class MainActivity extends Activity {
         panel.setPadding(dp(20.0f), dp(12.0f), dp(20.0f), dp(20.0f));
         panel.setFocusableInTouchMode(true);
         LinearLayout header = new LinearLayout(this);
-        header.setGravity(16);
+        header.setGravity(Gravity.CENTER_VERTICAL);
         header.addView(text(this.page == 1 ? "Новый контакт" : "Новый чат", 20, ink(), true), new LinearLayout.LayoutParams(0, -2, 1.0f));
         Button close = button("×", false);
         close.setContentDescription("Закрыть");
@@ -2484,7 +2404,7 @@ public final class MainActivity extends Activity {
         if (this.page == 1) {
             Button phonebook = button("Телефонная книга", false);
             panel.addView(phonebook, new LinearLayout.LayoutParams(-1, -2));
-            phonebook.setOnClickListener(view -> MainActivity.this.newChatStep46(dialog, view));
+            phonebook.setOnClickListener(view -> MainActivity.this.pickFromPhonebook(dialog, view));
             if (selectedContact != null) {
                 TextView picked = text(selectedContact, 14, ink(), true);
                 picked.setPadding(0, dp(8.0f), 0, dp(4.0f));
@@ -2499,7 +2419,7 @@ public final class MainActivity extends Activity {
         LinearLayout.LayoutParams openParams = new LinearLayout.LayoutParams(-1, -2);
         openParams.topMargin = dp(8.0f);
         panel.addView(open, openParams);
-        open.setOnClickListener(view -> MainActivity.this.newChatStep47(input, dialog, view));
+        open.setOnClickListener(view -> MainActivity.this.openTypedChat(input, dialog, view));
         dialog.setContentView(panel);
         dialog.setCanceledOnTouchOutside(true);
         Window window = dialog.getWindow();
@@ -2512,16 +2432,16 @@ public final class MainActivity extends Activity {
         window.setLayout(width, -2);
     }
 
-    public void newChatStep46(Dialog sheet, View v) {
+    public void pickFromPhonebook(Dialog sheet, View v) {
         try {
             startActivityForResult(new Intent("android.intent.action.PICK", ContactsContract.CommonDataKinds.Phone.CONTENT_URI), 43);
             sheet.dismiss();
         } catch (ActivityNotFoundException e) {
-            Toast.makeText(this, "Телефонная книга недоступна", 0).show();
+            Toast.makeText(this, "Телефонная книга недоступна", Toast.LENGTH_SHORT).show();
         }
     }
 
-    public void newChatStep47(EditText input, Dialog sheet, View v) {
+    public void openTypedChat(EditText input, Dialog sheet, View v) {
         String name = input.getText().toString().trim().toLowerCase(Locale.ROOT);
         if (!name.matches("[a-z0-9_]{3,32}") || name.equals(user())) {
             input.setError("Введите другое имя: 3–32 символа");
@@ -2544,39 +2464,37 @@ public final class MainActivity extends Activity {
         actions[1] = "Выбрать фото аватара";
         actions[2] = "Удалить";
         actions[3] = blocked ? "Разблокировать" : "Заблокировать";
-        showDialog(new AlertDialog.Builder(this).setTitle(name).setItems(actions, (dialogInterface, i) -> MainActivity.this.chatActionsStep48(currentOwner, name, archived, blocked, dialogInterface, i)).setNegativeButton("Отмена", (DialogInterface.OnClickListener) null).create());
-    }
+        showDialog(new AlertDialog.Builder(this).setTitle(name).setItems(actions, (dialog, which) -> {
+            switch (which) {
+                case 0:
+                    this.store.setArchived(currentOwner, name, !archived);
+                    refreshChats();
+                    break;
+                case 1:
+                    pickProfilePhoto(chatAvatarKey(name));
+                    break;
+                case 2:
+                    confirmDeleteChat(name);
+                    break;
+                case 3:
+                    this.store.setBlocked(currentOwner, name, !blocked);
+                    Toast.makeText(this, blocked ? "Контакт разблокирован" : "Контакт заблокирован на этом устройстве", Toast.LENGTH_SHORT).show();
+                    refreshChats();
+                    break;
+            }
 
-    public void chatActionsStep48(String currentOwner, String name, boolean archived, boolean blocked, DialogInterface dialog, int which) {
-        switch (which) {
-            case 0:
-                this.store.setArchived(currentOwner, name, !archived);
-                refreshChats();
-                break;
-            case 1:
-                pickProfilePhoto(chatAvatarKey(name));
-                break;
-            case 2:
-                confirmDeleteChat(name);
-                break;
-            case 3:
-                this.store.setBlocked(currentOwner, name, !blocked);
-                Toast.makeText(this, blocked ? "Контакт разблокирован" : "Контакт заблокирован на этом устройстве", 0).show();
-                refreshChats();
-                break;
-        }
+        }).setNegativeButton("Отмена", (DialogInterface.OnClickListener) null).create());
     }
 
     private void confirmDeleteChat(final String name) {
         final String currentOwner = owner();
         final String currentUser = user();
-        showDialog(new AlertDialog.Builder(this).setTitle("Удалить чат?").setMessage("Переписка с " + name + " будет удалена с этого устройства.").setNegativeButton("Отмена", (DialogInterface.OnClickListener) null).setPositiveButton("Удалить", (dialogInterface, i) -> MainActivity.this.confirmDeleteChatStep49(currentOwner, currentUser, name, dialogInterface, i)).create());
-    }
+        showDialog(new AlertDialog.Builder(this).setTitle("Удалить чат?").setMessage("Переписка с " + name + " будет удалена с этого устройства.").setNegativeButton("Отмена", (DialogInterface.OnClickListener) null).setPositiveButton("Удалить", (dialog, which) -> {
+            this.store.deleteChat(currentOwner, currentUser, name);
+            this.preferences.edit().remove("draft|" + currentOwner + "|" + name).remove(chatAvatarKey(name) + "photo").apply();
+            refreshChats();
 
-    public void confirmDeleteChatStep49(String currentOwner, String currentUser, String name, DialogInterface dialog, int which) {
-        this.store.deleteChat(currentOwner, currentUser, name);
-        this.preferences.edit().remove("draft|" + currentOwner + "|" + name).remove(chatAvatarKey(name) + "photo").apply();
-        refreshChats();
+        }).create());
     }
 
     private void showConversation() {
@@ -2584,7 +2502,7 @@ public final class MainActivity extends Activity {
         this.content.addView(this.list, new LinearLayout.LayoutParams(-1, -2));
         refreshMessages();
         LinearLayout row = new LinearLayout(this);
-        row.setGravity(16);
+        row.setGravity(Gravity.CENTER_VERTICAL);
         row.setPadding(dp(12.0f), dp(4.0f), dp(12.0f), dp(4.0f));
         this.compose.addView(row);
         this.messageInput = new EditText(this);
@@ -2623,44 +2541,34 @@ public final class MainActivity extends Activity {
         LinearLayout.LayoutParams voiceParams = new LinearLayout.LayoutParams(dp(44.0f), dp(48.0f));
         voiceParams.setMarginEnd(dp(6.0f));
         row.addView(this.voiceButton, voiceParams);
-        this.voiceButton.setOnClickListener(view -> MainActivity.this.showConversationStep50(view));
+        this.voiceButton.setOnClickListener(v -> {
+            if (this.voiceRecorder != null) {
+                finishVoiceRecording(true);
+            } else {
+                beginVoiceRecording();
+            }
+
+        });
         Button send = button("➤", true);
         send.setContentDescription("Отправить сообщение");
         row.addView(send, new LinearLayout.LayoutParams(dp(56.0f), dp(48.0f)));
-        send.setOnClickListener(view -> MainActivity.this.showConversationStep52(view));
-        this.scroll.post(() -> MainActivity.this.showConversationStep53());
-    }
+        send.setOnClickListener(v -> {
+            String value = this.messageInput.getText().toString().trim();
+            if (value.isEmpty()) {
+                return;
+            }
+            if (this.store.isBlocked(owner(), this.peer)) {
+                this.messageInput.setError("Сначала разблокируйте контакт");
+                return;
+            }
+            this.store.queue(owner(), user(), this.peer, value, !onlineAccount());
+            this.messageInput.setText("");
+            refreshMessages();
+            this.scroll.post(() -> this.scroll.fullScroll(130));
+            sync();
 
-    public void showConversationStep50(View v) {
-        if (this.voiceRecorder != null) {
-            finishVoiceRecording(true);
-        } else {
-            beginVoiceRecording();
-        }
-    }
-
-    public void showConversationStep52(View v) {
-        String value = this.messageInput.getText().toString().trim();
-        if (value.isEmpty()) {
-            return;
-        }
-        if (this.store.isBlocked(owner(), this.peer)) {
-            this.messageInput.setError("Сначала разблокируйте контакт");
-            return;
-        }
-        this.store.queue(owner(), user(), this.peer, value, !onlineAccount());
-        this.messageInput.setText("");
-        refreshMessages();
-        this.scroll.post(() -> MainActivity.this.showConversationStep51());
-        sync();
-    }
-
-    public void showConversationStep51() {
-        this.scroll.fullScroll(130);
-    }
-
-    public void showConversationStep53() {
-        this.scroll.fullScroll(130);
+        });
+        this.scroll.post(() -> this.scroll.fullScroll(130));
     }
 
     private void beginVoiceRecording() {
@@ -2684,23 +2592,22 @@ public final class MainActivity extends Activity {
             this.voiceRecorder.setMaxDuration(15000);
             this.voiceRecorder.setMaxFileSize(68000L);
             this.voiceRecorder.setOutputFile(this.recordingFile.getPath());
-            this.voiceRecorder.setOnInfoListener((mediaRecorder, i, i2) -> MainActivity.this.beginVoiceRecordingStep54(mediaRecorder, i, i2));
+            this.voiceRecorder.setOnInfoListener((recorder, what, extra) -> {
+                if (recorder == this.voiceRecorder) {
+                    if (what == 800 || what == 801) {
+                        finishVoiceRecording(true);
+                    }
+                }
+
+            });
             this.voiceRecorder.prepare();
             this.voiceRecorder.start();
             this.voiceButton.setText("■");
             this.voiceButton.setContentDescription("Остановить запись и отправить");
-            Toast.makeText(this, "Запись до 15 секунд", 0).show();
+            Toast.makeText(this, "Запись до 15 секунд", Toast.LENGTH_SHORT).show();
         } catch (IOException | RuntimeException e) {
             finishVoiceRecording(false);
-            Toast.makeText(this, "Не удалось включить микрофон", 0).show();
-        }
-    }
-
-    public void beginVoiceRecordingStep54(MediaRecorder recorder, int what, int extra) {
-        if (recorder == this.voiceRecorder) {
-            if (what == 800 || what == 801) {
-                finishVoiceRecording(true);
-            }
+            Toast.makeText(this, "Не удалось включить микрофон", Toast.LENGTH_SHORT).show();
         }
     }
 
@@ -2742,7 +2649,7 @@ public final class MainActivity extends Activity {
             }
             this.store.queue(owner(), user(), this.peer, "Голосовое сообщение", !onlineAccount(), audio);
             refreshMessages();
-            this.scroll.post(this::finishVoiceRecordingStep55);
+            this.scroll.post(this::scrollToBottom);
             sync();
         } catch (IOException e) {
             Toast.makeText(this, "Голосовое сообщение не записалось", Toast.LENGTH_SHORT).show();
@@ -2753,7 +2660,7 @@ public final class MainActivity extends Activity {
         }
     }
 
-    public void finishVoiceRecordingStep55() {
+    public void scrollToBottom() {
         this.scroll.fullScroll(130);
     }
 
@@ -2775,7 +2682,7 @@ public final class MainActivity extends Activity {
         String target = this.requestedVoicePeer;
         this.requestedVoicePeer = null;
         if (results.length == 0 || results[0] != 0) {
-            Toast.makeText(this, "Для записи нужен доступ к микрофону", 0).show();
+            Toast.makeText(this, "Для записи нужен доступ к микрофону", Toast.LENGTH_SHORT).show();
         } else if (target != null && target.equals(this.peer) && this.voiceButton != null) {
             beginVoiceRecording();
         }
@@ -2800,36 +2707,34 @@ public final class MainActivity extends Activity {
             this.voicePlayer = new MediaPlayer();
             this.voicePlayer.setAudioAttributes(new AudioAttributes.Builder().setUsage(1).build());
             this.voicePlayer.setDataSource(this.playingFile.getAbsolutePath());
-            this.voicePlayer.setOnPreparedListener(mediaPlayer -> MainActivity.this.playVoiceStep56(mediaPlayer));
-            this.voicePlayer.setOnCompletionListener(mediaPlayer -> MainActivity.this.playVoiceStep57(mediaPlayer));
+            this.voicePlayer.setOnPreparedListener(player -> {
+                if (player == this.voicePlayer) {
+                    player.start();
+                }
+
+            });
+            this.voicePlayer.setOnCompletionListener(player -> {
+                if (player == this.voicePlayer) {
+                    stopVoicePlayback();
+                }
+
+            });
             this.voicePlayer.setOnErrorListener((mediaPlayer, i, i2) -> {
-                    boolean playVoiceStep58;
-                    playVoiceStep58 = MainActivity.this.playVoiceStep58(mediaPlayer, i, i2);
-                    return playVoiceStep58;
+                    boolean onVoicePlaybackError;
+                    onVoicePlaybackError = MainActivity.this.onVoicePlaybackError(mediaPlayer, i, i2);
+                    return onVoicePlaybackError;
             });
             this.voicePlayer.prepareAsync();
         } catch (IOException | RuntimeException e) {
             stopVoicePlayback();
-            Toast.makeText(this, "Не удалось воспроизвести запись", 0).show();
+            Toast.makeText(this, "Не удалось воспроизвести запись", Toast.LENGTH_SHORT).show();
         }
     }
 
-    public void playVoiceStep56(MediaPlayer player) {
-        if (player == this.voicePlayer) {
-            player.start();
-        }
-    }
-
-    public void playVoiceStep57(MediaPlayer player) {
+    public boolean onVoicePlaybackError(MediaPlayer player, int what, int extra) {
         if (player == this.voicePlayer) {
             stopVoicePlayback();
-        }
-    }
-
-    public boolean playVoiceStep58(MediaPlayer player, int what, int extra) {
-        if (player == this.voicePlayer) {
-            stopVoicePlayback();
-            Toast.makeText(this, "Не удалось воспроизвести запись", 0).show();
+            Toast.makeText(this, "Не удалось воспроизвести запись", Toast.LENGTH_SHORT).show();
             return true;
         }
         return true;
@@ -2858,7 +2763,7 @@ public final class MainActivity extends Activity {
             outline.setColor(0);
             outline.setCornerRadius(dp(16.0f));
             int outlineColor = mine ? accent() : headerInk();
-            outline.setStroke(dp(1.0f), (16777215 & outlineColor) | (this.dark ? 1694498816 : 1342177280));
+            outline.setStroke(dp(1.0f), (outlineColor & 0xFFFFFF) | (this.dark ? 0x65000000 : 0x50000000));
             bubble.setBackground(outline);
             if (message.audio().isEmpty()) {
                 TextView body = text(message.text(), 16, headerInk(), false);
@@ -2866,7 +2771,7 @@ public final class MainActivity extends Activity {
                 bubble.addView(body);
             } else {
                 Button play = button("▶  Голосовое сообщение", false);
-                play.setOnClickListener(view -> MainActivity.this.refreshMessagesStep59(message, view));
+                play.setOnClickListener(v -> playVoice(message.audio()));
                 bubble.addView(play);
             }
             String suffix = message.status() == 1 ? "В очереди" : message.status() == 2 ? "Не отправлено · нажмите для действий" : message.status() == 3 ? "Только на устройстве" : "";
@@ -2878,7 +2783,7 @@ public final class MainActivity extends Activity {
             if (mine && message.status() == 2) {
                 bubble.setClickable(true);
                 bubble.setFocusable(true);
-                bubble.setOnClickListener(view -> MainActivity.this.refreshMessagesStep60(message, view));
+                bubble.setOnClickListener(v -> messageActions(message));
             }
             LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-2, -2);
             params.gravity = mine ? Gravity.END : Gravity.START;
@@ -2889,34 +2794,25 @@ public final class MainActivity extends Activity {
         }
     }
 
-    public void refreshMessagesStep59(ChatStore.Message message, View v) {
-        playVoice(message.audio());
-    }
-
-    public void refreshMessagesStep60(ChatStore.Message message, View v) {
-        messageActions(message);
-    }
-
     private void messageActions(final ChatStore.Message message) {
         final String currentOwner = owner();
-        AlertDialog dialog = new AlertDialog.Builder(this).setTitle("Сообщение").setItems(new String[]{"Повторить", "Удалить"}, (dialogInterface, i) -> MainActivity.this.messageActionsStep61(currentOwner, message, dialogInterface, i)).setNegativeButton("Отмена", (DialogInterface.OnClickListener) null).create();
-        showDialog(dialog);
-    }
+        AlertDialog dialog = new AlertDialog.Builder(this).setTitle("Сообщение").setItems(new String[]{"Повторить", "Удалить"}, (ignored, which) -> {
+            if (which == 0) {
+                this.store.retry(currentOwner, message);
+                sync();
+            } else {
+                this.store.removeUnsent(currentOwner, message);
+            }
+            refreshMessages();
 
-    public void messageActionsStep61(String currentOwner, ChatStore.Message message, DialogInterface ignored, int which) {
-        if (which == 0) {
-            this.store.retry(currentOwner, message);
-            sync();
-        } else {
-            this.store.removeUnsent(currentOwner, message);
-        }
-        refreshMessages();
+        }).setNegativeButton("Отмена", (DialogInterface.OnClickListener) null).create();
+        showDialog(dialog);
     }
 
     private SlidingTabs buildSettingsTabs(LinearLayout linearLayout) {
         final SlidingTabs tabs = new SlidingTabs(headerAccentPill());
         GradientDrawable track = new GradientDrawable();
-        track.setColor(this.dark ? 654311423 : 369098752);
+        track.setColor(this.dark ? 0x26FFFFFF : 0x16000000);
         track.setCornerRadius(dp(28.0f));
         tabs.setBackground(track);
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-2, -2);
@@ -2929,32 +2825,27 @@ public final class MainActivity extends Activity {
         for (int i = 0; i < choices.length; i++) {
             final int tab = i;
             TextView choice = text(SETTINGS_ICONS[i], 22, ink(), true);
-            choice.setGravity(17);
+            choice.setGravity(Gravity.CENTER);
             choice.setContentDescription(SETTINGS_TABS[i]);
             choice.setTooltipText(SETTINGS_TABS[i]);
             choice.setFocusable(true);
-            choice.setOnClickListener(view -> MainActivity.this.buildSettingsTabsStep62(tab, view));
+            choice.setOnClickListener(v -> selectSectionTab(tab));
             choices[i] = choice;
             row.addView(choice, new LinearLayout.LayoutParams(dp(44.0f), dp(44.0f)));
         }
-        row.addOnLayoutChangeListener((view, i2, i3, i4, i5, i6, i7, i8, i9) -> MainActivity.this.buildSettingsTabsStep63(tabs, choices, view, i2, i3, i4, i5, i6, i7, i8, i9));
+        row.addOnLayoutChangeListener((view, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom) -> {
+            if (right - left != oldRight - oldLeft) {
+                tabs.moveTo(choices[this.settingsTab], false);
+            }
+
+        });
         return tabs;
-    }
-
-    public void buildSettingsTabsStep62(int tab, View v) {
-        selectSectionTab(tab);
-    }
-
-    public void buildSettingsTabsStep63(SlidingTabs tabs, TextView[] choices, View view, int left, int top, int right, int bottom, int oldLeft, int oldTop, int oldRight, int oldBottom) {
-        if (right - left != oldRight - oldLeft) {
-            tabs.moveTo(choices[this.settingsTab], false);
-        }
     }
 
     private void buildClipsTabs(LinearLayout header) {
         this.clipsTabs = new SlidingTabs(headerAccentPill());
         GradientDrawable track = new GradientDrawable();
-        track.setColor(this.dark ? 654311423 : 369098752);
+        track.setColor(this.dark ? 0x26FFFFFF : 0x16000000);
         track.setCornerRadius(dp(28.0f));
         this.clipsTabs.setBackground(track);
         header.addView(this.clipsTabs, new LinearLayout.LayoutParams(-2, -2));
@@ -2962,28 +2853,19 @@ public final class MainActivity extends Activity {
         row.setPadding(dp(3.0f), dp(3.0f), dp(3.0f), dp(3.0f));
         this.clipsTabs.addView(row, new FrameLayout.LayoutParams(-2, -2));
         clipsHeaderButton(row, "+", "Добавить клип", () -> MainActivity.this.pickClipVideo());
-        this.clipsChoices[0] = clipsHeaderButton(row, "▦", "Все клипы", () -> MainActivity.this.buildClipsTabsStep64());
-        this.clipsChoices[1] = clipsHeaderButton(row, "☆", "Рекомендации", () -> MainActivity.this.buildClipsTabsStep65());
-        row.addOnLayoutChangeListener((view, i, i2, i3, i4, i5, i6, i7, i8) -> MainActivity.this.buildClipsTabsStep66(view, i, i2, i3, i4, i5, i6, i7, i8));
-    }
+        this.clipsChoices[0] = clipsHeaderButton(row, "▦", "Все клипы", () -> selectClipsTab(false));
+        this.clipsChoices[1] = clipsHeaderButton(row, "☆", "Рекомендации", () -> selectClipsTab(true));
+        row.addOnLayoutChangeListener((view, i, i2, i3, i4, i5, i6, i7, i8) -> {
+            if (i3 - i != i7 - i5) {
+                this.clipsTabs.moveTo(this.clipsChoices[this.clipRecommendations ? 1 : 0], false);
+            }
 
-    public void buildClipsTabsStep64() {
-        selectClipsTab(false);
-    }
-
-    public void buildClipsTabsStep65() {
-        selectClipsTab(true);
-    }
-
-    public void buildClipsTabsStep66(View view, int i, int i2, int i3, int i4, int i5, int i6, int i7, int i8) {
-        if (i3 - i != i7 - i5) {
-            this.clipsTabs.moveTo(this.clipsChoices[this.clipRecommendations ? 1 : 0], false);
-        }
+        });
     }
 
     private TextView clipsHeaderButton(LinearLayout row, String icon, String label, final Runnable action) {
         TextView button = text(icon, 22, headerInk(), true);
-        button.setGravity(17);
+        button.setGravity(Gravity.CENTER);
         button.setContentDescription(label);
         button.setTooltipText(label);
         button.setFocusable(true);
@@ -3022,16 +2904,15 @@ public final class MainActivity extends Activity {
             int number2 = number + 1;
             Button play = button("▶  Клип " + number, false);
             newCard().addView(play);
-            play.setOnClickListener(view -> MainActivity.this.showClipsStep68(clip, view));
-            number = number2;
-        }
-    }
+            play.setOnClickListener(v -> {
+                try {
+                    startActivity(new Intent("android.intent.action.VIEW").setDataAndType(Uri.parse(clip), "video/*").addFlags(1));
+                } catch (ActivityNotFoundException | SecurityException e) {
+                    Toast.makeText(this, "Не удалось открыть видео", Toast.LENGTH_SHORT).show();
+                }
 
-    public void showClipsStep68(String clip, View v) {
-        try {
-            startActivity(new Intent("android.intent.action.VIEW").setDataAndType(Uri.parse(clip), "video/*").addFlags(1));
-        } catch (ActivityNotFoundException | SecurityException e) {
-            Toast.makeText(this, "Не удалось открыть видео", 0).show();
+            });
+            number = number2;
         }
     }
 
@@ -3040,7 +2921,7 @@ public final class MainActivity extends Activity {
         try {
             startActivityForResult(picker, 44);
         } catch (ActivityNotFoundException e) {
-            Toast.makeText(this, "Выбор видео недоступен", 0).show();
+            Toast.makeText(this, "Выбор видео недоступен", Toast.LENGTH_SHORT).show();
         }
     }
 
@@ -3050,8 +2931,8 @@ public final class MainActivity extends Activity {
     }
 
     private void updateSectionTabs(SlidingTabs tabs, TextView[] choices, boolean visible, int selected) {
-        boolean wasVisible = tabs.getVisibility() == 0;
-        tabs.setVisibility(visible ? 0 : 8);
+        boolean wasVisible = tabs.getVisibility() == View.VISIBLE;
+        tabs.setVisibility(visible ? View.VISIBLE : View.GONE);
         if (visible) {
             int i = 0;
             while (i < choices.length) {
@@ -3096,27 +2977,25 @@ public final class MainActivity extends Activity {
         theme.setPadding(0, dp(12.0f), 0, dp(12.0f));
         theme.setChecked(this.dark);
         card.addView(theme);
-        theme.setOnCheckedChangeListener((compoundButton, z) -> MainActivity.this.showAppSettingsStep69(compoundButton, z));
+        theme.setOnCheckedChangeListener((v, checked) -> {
+            this.preferences.edit().putBoolean("dark", checked).apply();
+            recreate();
+
+        });
         this.updateText = text("", 14, muted(), false);
         this.updateText.setPadding(0, dp(8.0f), 0, dp(8.0f));
         card.addView(this.updateText);
         this.updateButton = button("Проверить обновления", false);
         card.addView(this.updateButton, new LinearLayout.LayoutParams(-1, -2));
-        this.updateButton.setOnClickListener(view -> MainActivity.this.showAppSettingsStep70(view));
+        this.updateButton.setOnClickListener(v -> {
+            if (this.updates.phase() == UpdateManager.Phase.READY) {
+                requestInstall();
+            } else {
+                this.updates.check();
+            }
+
+        });
         refreshUpdateControls();
-    }
-
-    public void showAppSettingsStep69(CompoundButton v, boolean checked) {
-        this.preferences.edit().putBoolean("dark", checked).apply();
-        recreate();
-    }
-
-    public void showAppSettingsStep70(View v) {
-        if (this.updates.phase() == UpdateManager.Phase.READY) {
-            requestInstall();
-        } else {
-            this.updates.check();
-        }
     }
 
     private void showAccountSettings() {
@@ -3128,7 +3007,15 @@ public final class MainActivity extends Activity {
             card.addView(host);
             Button local = button("Перейти в локальный режим", false);
             card.addView(local);
-            local.setOnClickListener(view -> MainActivity.this.showAccountSettingsStep71(view));
+            local.setOnClickListener(v -> {
+                this.authenticationGeneration++;
+                String session = serverSessionKey(this.preferences.getString("server", ""));
+                this.preferences.edit().remove(session + "user").remove(session + "token").remove("token").remove("user").remove("server").apply();
+                this.connectionStatus = "";
+                this.peer = null;
+                render();
+
+            });
             return;
         }
         TextView hint = text("Локальные чаты доступны без сервера. Для переписки укажите интернет-сервер или ссылку с телефона в той же сети Wi-Fi. Затем войдите или создайте аккаунт.", 14, muted(), false);
@@ -3156,25 +3043,8 @@ public final class MainActivity extends Activity {
         this.authStatus.setAccessibilityLiveRegion(1);
         card.addView(this.authStatus);
         updateStatus();
-        login.setOnClickListener(view -> MainActivity.this.showAccountSettingsStep72(server, username, password, login, register, view));
-        register.setOnClickListener(view -> MainActivity.this.showAccountSettingsStep73(server, username, password, login, register, view));
-    }
-
-    public void showAccountSettingsStep71(View v) {
-        this.authenticationGeneration++;
-        String session = serverSessionKey(this.preferences.getString("server", ""));
-        this.preferences.edit().remove(session + "user").remove(session + "token").remove("token").remove("user").remove("server").apply();
-        this.connectionStatus = "";
-        this.peer = null;
-        render();
-    }
-
-    public void showAccountSettingsStep72(EditText server, EditText username, EditText password, Button login, Button register, View v) {
-        authenticate(server, username, password, false, login, register);
-    }
-
-    public void showAccountSettingsStep73(EditText server, EditText username, EditText password, Button login, Button register, View v) {
-        authenticate(server, username, password, true, login, register);
+        login.setOnClickListener(v -> authenticate(server, username, password, false, login, register));
+        register.setOnClickListener(v -> authenticate(server, username, password, true, login, register));
     }
 
     private void showServerSettings() {
@@ -3197,48 +3067,38 @@ public final class MainActivity extends Activity {
         cloudCard.addView(text(cloud.isEmpty() ? "Укажите HTTPS-адрес сервера Oracle Cloud." : cloud, 14, muted(), false));
         Button cloudConnect = button(cloud.isEmpty() ? "Настроить Pulse Cloud" : "Выбрать Pulse Cloud", false);
         cloudCard.addView(cloudConnect, new LinearLayout.LayoutParams(-1, -2));
-        cloudConnect.setOnClickListener(view -> MainActivity.this.showServerSettingsStep74(cloud, view));
+        cloudConnect.setOnClickListener(v -> {
+            if (!cloud.isEmpty()) {
+                selectServer(cloud);
+            } else {
+                editServerAddress(true);
+            }
+
+        });
         if (!cloud.isEmpty()) {
             Button edit = button("Изменить адрес Pulse Cloud", false);
             cloudCard.addView(edit, new LinearLayout.LayoutParams(-1, -2));
-            edit.setOnClickListener(view -> MainActivity.this.showServerSettingsStep75(view));
+            edit.setOnClickListener(v -> editServerAddress(true));
         }
         LinearLayout localCard = newCard();
         localCard.addView(text("Локальный сервер", 19, ink(), true));
         localCard.addView(text(local.isEmpty() ? "Запустите сервер на телефоне или укажите ссылку другого устройства." : local, 14, muted(), false));
         Button localLink = button(local.isEmpty() ? "Указать ссылку" : "Выбрать локальный сервер", false);
         localCard.addView(localLink, new LinearLayout.LayoutParams(-1, -2));
-        localLink.setOnClickListener(view -> MainActivity.this.showServerSettingsStep76(local, view));
+        localLink.setOnClickListener(v -> {
+            if (!local.isEmpty()) {
+                selectServer(local);
+            } else {
+                editServerAddress(false);
+            }
+
+        });
         if (!local.isEmpty()) {
             Button edit2 = button("Изменить локальную ссылку", false);
             localCard.addView(edit2, new LinearLayout.LayoutParams(-1, -2));
-            edit2.setOnClickListener(view -> MainActivity.this.showServerSettingsStep77(view));
+            edit2.setOnClickListener(v -> editServerAddress(false));
         }
         showPhoneHost();
-    }
-
-    public void showServerSettingsStep74(String cloud, View v) {
-        if (!cloud.isEmpty()) {
-            selectServer(cloud);
-        } else {
-            editServerAddress(true);
-        }
-    }
-
-    public void showServerSettingsStep75(View v) {
-        editServerAddress(true);
-    }
-
-    public void showServerSettingsStep76(String local, View v) {
-        if (!local.isEmpty()) {
-            selectServer(local);
-        } else {
-            editServerAddress(false);
-        }
-    }
-
-    public void showServerSettingsStep77(View v) {
-        editServerAddress(false);
     }
 
     private void editServerAddress(final boolean cloud) {
@@ -3249,26 +3109,21 @@ public final class MainActivity extends Activity {
         form.setPadding(dp(20.0f), dp(8.0f), dp(20.0f), 0);
         form.addView(input);
         final AlertDialog dialog = new AlertDialog.Builder(this).setTitle(cloud ? "Pulse Cloud" : "Локальный сервер").setView(form).setNegativeButton("Отмена", (DialogInterface.OnClickListener) null).setPositiveButton("Подключиться", (DialogInterface.OnClickListener) null).create();
-        dialog.setOnShowListener(dialogInterface -> MainActivity.this.editServerAddressStep79(dialog, input, cloud, key, dialogInterface));
-        showDialog(dialog);
-    }
-
-    public void editServerAddressStep79(final AlertDialog dialog, final EditText input, final boolean cloud, final String key, DialogInterface ignored) {
-        dialog.getButton(-1).setOnClickListener(view -> MainActivity.this.editServerAddressStep78(input, cloud, key, dialog, view));
-    }
-
-    public void editServerAddressStep78(EditText input, boolean cloud, String key, AlertDialog dialog, View v) {
-        try {
-            String address = PulseApi.normalizeUrl(input.getText().toString());
-            if (cloud && (!address.startsWith("https://") || address.contains("#"))) {
-                throw new IllegalArgumentException("Expected public HTTPS URL");
+        dialog.setOnShowListener(ignored -> dialog.getButton(-1).setOnClickListener(v -> {
+            try {
+                String address = PulseApi.normalizeUrl(input.getText().toString());
+                if (cloud && (!address.startsWith("https://") || address.contains("#"))) {
+                    throw new IllegalArgumentException("Expected public HTTPS URL");
+                }
+                this.preferences.edit().putString(key, address).apply();
+                dialog.dismiss();
+                selectServer(address);
+            } catch (Exception e) {
+                input.setError(cloud ? "Укажите HTTPS-адрес Pulse Cloud" : "Укажите полную ссылку подключения");
             }
-            this.preferences.edit().putString(key, address).apply();
-            dialog.dismiss();
-            selectServer(address);
-        } catch (Exception e) {
-            input.setError(cloud ? "Укажите HTTPS-адрес Pulse Cloud" : "Укажите полную ссылку подключения");
-        }
+
+        }));
+        showDialog(dialog);
     }
 
     private String serverSessionKey(String address) {
@@ -3311,58 +3166,51 @@ public final class MainActivity extends Activity {
         card.addView(this.hostText);
         this.hostButton = button("Запустить сервер", false);
         card.addView(this.hostButton, new LinearLayout.LayoutParams(-1, -2));
-        this.hostButton.setOnClickListener(view -> MainActivity.this.showPhoneHostStep80(view));
+        this.hostButton.setOnClickListener(v -> {
+            if (this.phoneHost.phase() != PhoneHost.Phase.RUNNING) {
+                if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission("android.permission.POST_NOTIFICATIONS") != 0) {
+                    requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"}, 74);
+                }
+                this.phoneHost.start();
+                return;
+            }
+            this.phoneHost.stop();
+
+        });
         this.useHostButton = button("Подключиться на этом телефоне", false);
         card.addView(this.useHostButton, new LinearLayout.LayoutParams(-1, -2));
-        this.useHostButton.setOnClickListener(view -> MainActivity.this.showPhoneHostStep81(view));
+        this.useHostButton.setOnClickListener(v -> {
+            String address = this.phoneHost.localUrl();
+            if (address.isEmpty()) {
+                return;
+            }
+            this.preferences.edit().putString("localServer", address).apply();
+            selectServer(address);
+
+        });
         this.shareHostButton = button("Поделиться подключением", false);
         card.addView(this.shareHostButton, new LinearLayout.LayoutParams(-1, -2));
-        this.shareHostButton.setOnClickListener(view -> MainActivity.this.showPhoneHostStep83(view));
-        refreshHostControls();
-    }
-
-    public void showPhoneHostStep80(View v) {
-        if (this.phoneHost.phase() != PhoneHost.Phase.RUNNING) {
-            if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission("android.permission.POST_NOTIFICATIONS") != 0) {
-                requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"}, 74);
+        this.shareHostButton.setOnClickListener(v -> {
+            List<String> addresses = this.phoneHost.lanUrls();
+            if (addresses.isEmpty()) {
+                return;
             }
-            this.phoneHost.start();
-            return;
-        }
-        this.phoneHost.stop();
-    }
+            final String[] options = (String[]) addresses.toArray(new String[0]);
+            if (options.length == 1) {
+                shareHost(options[0]);
+            } else {
+                showDialog(new AlertDialog.Builder(this).setTitle("Выберите адрес своей сети Wi-Fi").setItems(options, (dialog, which) -> shareHost(options[which])).setNegativeButton("Отмена", (DialogInterface.OnClickListener) null).create());
+            }
 
-    public void showPhoneHostStep81(View v) {
-        String address = this.phoneHost.localUrl();
-        if (address.isEmpty()) {
-            return;
-        }
-        this.preferences.edit().putString("localServer", address).apply();
-        selectServer(address);
-    }
-
-    public void showPhoneHostStep83(View v) {
-        List<String> addresses = this.phoneHost.lanUrls();
-        if (addresses.isEmpty()) {
-            return;
-        }
-        final String[] options = (String[]) addresses.toArray(new String[0]);
-        if (options.length == 1) {
-            shareHost(options[0]);
-        } else {
-            showDialog(new AlertDialog.Builder(this).setTitle("Выберите адрес своей сети Wi-Fi").setItems(options, (dialogInterface, i) -> MainActivity.this.showPhoneHostStep82(options, dialogInterface, i)).setNegativeButton("Отмена", (DialogInterface.OnClickListener) null).create());
-        }
-    }
-
-    public void showPhoneHostStep82(String[] options, DialogInterface dialog, int which) {
-        shareHost(options[which]);
+        });
+        refreshHostControls();
     }
 
     private void shareHost(String address) {
         try {
             startActivity(Intent.createChooser(new Intent("android.intent.action.SEND").setType("text/plain").putExtra("android.intent.extra.TEXT", address), "Подключение к Pulse"));
         } catch (ActivityNotFoundException e) {
-            Toast.makeText(this, "Скопируйте адрес сервера из настроек", 1).show();
+            Toast.makeText(this, "Скопируйте адрес сервера из настроек", Toast.LENGTH_LONG).show();
         }
     }
 
@@ -3386,8 +3234,8 @@ public final class MainActivity extends Activity {
         this.hostText.setText(description);
         this.hostButton.setText(running ? "Остановить сервер" : "Запустить сервер");
         this.hostButton.setEnabled((phase == PhoneHost.Phase.STARTING || phase == PhoneHost.Phase.STOPPING) ? false : true);
-        this.useHostButton.setVisibility(running ? 0 : 8);
-        this.shareHostButton.setVisibility(running ? 0 : 8);
+        this.useHostButton.setVisibility(running ? View.VISIBLE : View.GONE);
+        this.shareHostButton.setVisibility(running ? View.VISIBLE : View.GONE);
         this.shareHostButton.setEnabled(running && !this.phoneHost.lanUrls().isEmpty());
     }
 
@@ -3446,13 +3294,9 @@ public final class MainActivity extends Activity {
         refreshUpdateControls();
         updateHeader();
         if (this.updates.takeOffer()) {
-            AlertDialog dialog = new AlertDialog.Builder(this).setTitle("Обновление готово").setMessage("Версия " + this.updates.update().name() + " скачана и проверена. Подтвердите установку в Android, затем откройте приложение снова.").setNegativeButton("Позже", (DialogInterface.OnClickListener) null).setPositiveButton("Установить", (dialogInterface, i) -> MainActivity.this.onUpdateChangedStep84(dialogInterface, i)).create();
+            AlertDialog dialog = new AlertDialog.Builder(this).setTitle("Обновление готово").setMessage("Версия " + this.updates.update().name() + " скачана и проверена. Подтвердите установку в Android, затем откройте приложение снова.").setNegativeButton("Позже", (DialogInterface.OnClickListener) null).setPositiveButton("Установить", (ignored, which) -> requestInstall()).create();
             showDialog(dialog);
         }
-    }
-
-    public void onUpdateChangedStep84(DialogInterface ignored, int which) {
-        requestInstall();
     }
 
     private void requestInstall() {
@@ -3463,18 +3307,17 @@ public final class MainActivity extends Activity {
                 return;
             } catch (ActivityNotFoundException | SecurityException e) {
                 this.awaitingInstallPermission = false;
-                Toast.makeText(this, "Не удалось открыть настройки установки", 1).show();
+                Toast.makeText(this, "Не удалось открыть настройки установки", Toast.LENGTH_LONG).show();
                 return;
             }
         }
-        this.updates.verify(obj -> MainActivity.this.openInstaller((File) obj), () -> MainActivity.this.requestInstallStep85());
-    }
+        this.updates.verify(obj -> MainActivity.this.openInstaller((File) obj), () -> {
+            if (isDestroyed()) {
+                return;
+            }
+            Toast.makeText(this, "Не удалось проверить обновление", Toast.LENGTH_LONG).show();
 
-    public void requestInstallStep85() {
-        if (isDestroyed()) {
-            return;
-        }
-        Toast.makeText(this, "Не удалось проверить обновление", 1).show();
+        });
     }
 
     public void openInstaller(File file) {
@@ -3485,7 +3328,7 @@ public final class MainActivity extends Activity {
             Uri uri = FileProvider.getUriForFile(this, getPackageName() + ".updates", file);
             startActivity(new Intent("android.intent.action.VIEW").setDataAndType(uri, "application/vnd.android.package-archive").addFlags(1));
         } catch (ActivityNotFoundException | IllegalArgumentException | SecurityException e) {
-            Toast.makeText(this, "Не удалось открыть установщик", 1).show();
+            Toast.makeText(this, "Не удалось открыть установщик", Toast.LENGTH_LONG).show();
         }
     }
 
@@ -3523,7 +3366,7 @@ public final class MainActivity extends Activity {
                     }
                     return;
                 } catch (SecurityException e) {
-                    Toast.makeText(this, "Не удалось сохранить доступ к видео", 0).show();
+                    Toast.makeText(this, "Не удалось сохранить доступ к видео", Toast.LENGTH_SHORT).show();
                     return;
                 }
             }
@@ -3582,47 +3425,44 @@ public final class MainActivity extends Activity {
             signup.setEnabled(false);
             this.connectionStatus = "Подключение…";
             updateStatus();
-            this.worker.execute(() -> MainActivity.this.authenticateStep88(base, register, name, secret, generation, login, signup));
+            this.worker.execute(() -> {
+                try {
+                    JSONObject result = new PulseApi(base, null).request(register ? "/v1/register" : "/v1/login", new JSONObject().put("username", name).put("password", secret));
+                    String returnedUser = result.getString("username");
+                    final String token = result.getString("token");
+                    if (!name.equals(returnedUser) || !token.matches("[a-f0-9]{64}")) {
+                        throw new IllegalStateException("Некорректный ответ");
+                    }
+                    this.handler.post(() -> {
+                        if (isFinishing() || isDestroyed() || generation != this.authenticationGeneration) {
+                            return;
+                        }
+                        String session = serverSessionKey(base);
+                        this.preferences.edit().putString("server", base).putString("user", name).putString("token", token).putString(session + "user", name).putString(session + "token", token).apply();
+                        this.connectionStatus = "Подключено";
+                        this.peer = null;
+                        this.page = 0;
+                        render();
+                        sync();
+
+                    });
+                } catch (Exception error) {
+                    this.handler.post(() -> {
+                        if (isFinishing() || isDestroyed() || generation != this.authenticationGeneration) {
+                            return;
+                        }
+                        login.setEnabled(true);
+                        signup.setEnabled(true);
+                        this.connectionStatus = authenticationError(error, register);
+                        updateStatus();
+
+                    });
+                }
+
+            });
         } catch (Exception e) {
             server.setError("Укажите HTTPS-адрес или полную ссылку подключения");
         }
-    }
-
-    public void authenticateStep88(final String base, final boolean register, final String name, String secret, final int generation, final Button login, final Button signup) {
-        try {
-            JSONObject result = new PulseApi(base, null).request(register ? "/v1/register" : "/v1/login", new JSONObject().put("username", name).put("password", secret));
-            String returnedUser = result.getString("username");
-            final String token = result.getString("token");
-            if (!name.equals(returnedUser) || !token.matches("[a-f0-9]{64}")) {
-                throw new IllegalStateException("Некорректный ответ");
-            }
-            this.handler.post(() -> MainActivity.this.authenticateStep86(generation, base, name, token));
-        } catch (Exception error) {
-            this.handler.post(() -> MainActivity.this.authenticateStep87(generation, login, signup, error, register));
-        }
-    }
-
-    public void authenticateStep86(int generation, String base, String name, String token) {
-        if (isFinishing() || isDestroyed() || generation != this.authenticationGeneration) {
-            return;
-        }
-        String session = serverSessionKey(base);
-        this.preferences.edit().putString("server", base).putString("user", name).putString("token", token).putString(session + "user", name).putString(session + "token", token).apply();
-        this.connectionStatus = "Подключено";
-        this.peer = null;
-        this.page = 0;
-        render();
-        sync();
-    }
-
-    public void authenticateStep87(int generation, Button login, Button signup, Exception error, boolean register) {
-        if (isFinishing() || isDestroyed() || generation != this.authenticationGeneration) {
-            return;
-        }
-        login.setEnabled(true);
-        signup.setEnabled(true);
-        this.connectionStatus = authenticationError(error, register);
-        updateStatus();
     }
 
     private static String authenticationError(Exception error, boolean register) {
@@ -3657,10 +3497,18 @@ public final class MainActivity extends Activity {
 
     private View buildFeedTab(LinearLayout linearLayout) {
         LinearLayout tab = new LinearLayout(this);
-        tab.setGravity(17);
+        tab.setGravity(Gravity.CENTER);
         tab.setFocusable(true);
         tab.setContentDescription("Фид");
-        tab.setOnClickListener(view -> MainActivity.this.buildFeedTabStep89(view));
+        tab.setOnClickListener(v -> {
+            if (this.page != 6) {
+                this.feedSection = 0;
+                selectAllChatsTab(5);
+            } else {
+                selectFeedSection(0);
+            }
+
+        });
         linearLayout.addView(tab, new LinearLayout.LayoutParams(dp(94.0f), dp(44.0f)));
         FrameLayout avatar = new FrameLayout(this);
         avatar.setImportantForAccessibility(4);
@@ -3668,26 +3516,17 @@ public final class MainActivity extends Activity {
         avatarParams.setMarginEnd(dp(5.0f));
         tab.addView(avatar, avatarParams);
         this.feedAvatarPhoto = outlinedAvatar();
-        avatar.addView(this.feedAvatarPhoto, new FrameLayout.LayoutParams(dp(25.0f), dp(25.0f), 17));
+        avatar.addView(this.feedAvatarPhoto, new FrameLayout.LayoutParams(dp(25.0f), dp(25.0f), Gravity.CENTER));
         View dot = new View(this);
         this.feedOnlineDot = new GradientDrawable();
         this.feedOnlineDot.setShape(1);
-        this.feedOnlineDot.setStroke(dp(1.0f), this.dark ? -14539738 : -1512724);
+        this.feedOnlineDot.setStroke(dp(1.0f), this.dark ? 0xFF222426 : 0xFFE8EAEC);
         dot.setBackground(this.feedOnlineDot);
-        avatar.addView(dot, new FrameLayout.LayoutParams(dp(9.0f), dp(9.0f), 8388693));
+        avatar.addView(dot, new FrameLayout.LayoutParams(dp(9.0f), dp(9.0f), Gravity.END | Gravity.BOTTOM));
         this.feedTabLabel = text("Фид", 13, ink(), true);
         this.feedTabLabel.setImportantForAccessibility(2);
         tab.addView(this.feedTabLabel);
         return tab;
-    }
-
-    public void buildFeedTabStep89(View v) {
-        if (this.page != 6) {
-            this.feedSection = 0;
-            selectAllChatsTab(5);
-        } else {
-            selectFeedSection(0);
-        }
     }
 
     private void updateFeedAvatar() {
@@ -3708,7 +3547,7 @@ public final class MainActivity extends Activity {
             mainActivity.showProfilePhoto(this.feedAvatarPhoto, key, initial, 13, headerInk());
         }
         boolean connected = onlineAccount() && "Подключено".equals(mainActivity.connectionStatus);
-        mainActivity.feedOnlineDot.setColor(connected ? mainActivity.dark ? -10103654 : -14451638 : -9077627);
+        mainActivity.feedOnlineDot.setColor(connected ? mainActivity.dark ? 0xFF65D49A : 0xFF237C4A : 0xFF757C85);
         if (Build.VERSION.SDK_INT >= 30) {
             mainActivity.feedShortcut.setStateDescription(connected ? "Онлайн" : "Офлайн");
         }
@@ -3717,7 +3556,7 @@ public final class MainActivity extends Activity {
     private void updateStatus() {
         String str;
         updateFeedAvatar();
-        this.status.setVisibility(this.peer != null ? 0 : 8);
+        this.status.setVisibility(this.peer != null ? View.VISIBLE : View.GONE);
         if (this.peer != null) {
             TextView textView = this.status;
             if (this.connectionStatus.isEmpty()) {
@@ -3729,16 +3568,16 @@ public final class MainActivity extends Activity {
         }
         if (this.authStatus != null) {
             this.authStatus.setText(this.connectionStatus);
-            this.authStatus.setVisibility(this.connectionStatus.isEmpty() ? 8 : 0);
+            this.authStatus.setVisibility(this.connectionStatus.isEmpty() ? View.GONE : View.VISIBLE);
         }
     }
 
     private TextView headerControl(String glyph) {
         TextView control = text(glyph, 24, headerInk(), true);
-        control.setGravity(17);
+        control.setGravity(Gravity.CENTER);
         GradientDrawable background = new GradientDrawable();
         background.setShape(1);
-        background.setColor(this.dark ? 654311423 : 1442840575);
+        background.setColor(this.dark ? 0x26FFFFFF : 0x55FFFFFF);
         control.setBackground(background);
         control.setClickable(true);
         control.setFocusable(true);
@@ -3753,13 +3592,9 @@ public final class MainActivity extends Activity {
         button.setContentDescription(label);
         button.setTooltipText(label);
         button.setFocusable(true);
-        button.setOnClickListener(view -> MainActivity.this.addCallButtonStep90(label, view));
+        button.setOnClickListener(v -> showCallUnavailable(label));
         row.addView(button, new LinearLayout.LayoutParams(dp(38.0f), dp(40.0f)));
         return button;
-    }
-
-    public void addCallButtonStep90(String label, View v) {
-        showCallUnavailable(label);
     }
 
     private void showCallUnavailable(String label) {
@@ -3771,22 +3606,27 @@ public final class MainActivity extends Activity {
             return;
         }
         boolean chatHeader = this.peer == null && isMainPage();
-        this.headerTitle.setVisibility(this.peer != null ? 0 : 8);
-        this.notificationsButton.setVisibility(chatHeader ? 0 : 8);
-        this.headerBack.setVisibility(this.peer != null ? 0 : 8);
-        this.headerAction.setVisibility(this.peer != null ? 0 : 8);
-        this.audioCallButton.setVisibility(this.peer != null ? 0 : 8);
-        this.videoCallButton.setVisibility(this.peer == null ? 8 : 0);
+        this.headerTitle.setVisibility(this.peer != null ? View.VISIBLE : View.GONE);
+        this.notificationsButton.setVisibility(chatHeader ? View.VISIBLE : View.GONE);
+        this.headerBack.setVisibility(this.peer != null ? View.VISIBLE : View.GONE);
+        this.headerAction.setVisibility(this.peer != null ? View.VISIBLE : View.GONE);
+        this.audioCallButton.setVisibility(this.peer != null ? View.VISIBLE : View.GONE);
+        this.videoCallButton.setVisibility(this.peer == null ? View.GONE : View.VISIBLE);
         if (this.peer != null) {
             setTitle(this.peer);
             this.headerTitle.setText(this.peer);
             this.headerBack.setContentDescription("Назад к чатам");
-            this.headerBack.setOnClickListener(view -> MainActivity.this.updateHeaderStep91(view));
+            this.headerBack.setOnClickListener(v -> {
+                this.peer = null;
+                this.page = 0;
+                render();
+
+            });
             this.headerAction.setText("↻");
             this.headerAction.setContentDescription("Обновить сообщения");
             this.headerAction.setEnabled(onlineAccount());
             this.headerAction.setAlpha(onlineAccount() ? 1.0f : 0.45f);
-            this.headerAction.setOnClickListener(view -> MainActivity.this.updateHeaderStep92(view));
+            this.headerAction.setOnClickListener(v -> sync());
             return;
         }
         if (this.page == 2) {
@@ -3814,16 +3654,6 @@ public final class MainActivity extends Activity {
         }
     }
 
-    public void updateHeaderStep91(View v) {
-        this.peer = null;
-        this.page = 0;
-        render();
-    }
-
-    public void updateHeaderStep92(View v) {
-        sync();
-    }
-
     public void sync() {
         if (!onlineAccount() || !this.syncing.compareAndSet(false, true)) {
             return;
@@ -3832,26 +3662,25 @@ public final class MainActivity extends Activity {
         final String currentUser = user();
         final String token = this.preferences.getString("token", "");
         final String base = this.preferences.getString("server", "");
-        this.worker.execute(() -> MainActivity.this.syncStep94(base, token, currentOwner, currentUser));
-    }
-
-    public void syncStep94(String base, String token, final String currentOwner, String currentUser) {
-        String result = "Подключено";
-        try {
+        this.worker.execute(() -> {
+            String result = "Подключено";
+            boolean changed = false;
             try {
                 PulseApi api = new PulseApi(base, token);
                 for (ChatStore.Message message : this.store.pending(currentOwner)) {
-                    if (!this.store.isBlocked(currentOwner, message.to())) {
-                        try {
-                            this.store.confirmPendingDelivery(currentOwner, currentUser, api.send(message));
-                        } catch (PulseApi.ApiError e) {
-                            if (e.code != 400 && e.code != 404 && e.code != 409 && e.code != 413) {
-                                throw e;
-                            }
-                            this.store.markFailed(currentOwner, message);
-                            result = "Есть неотправленные сообщения";
-                        }
+                    if (this.store.isBlocked(currentOwner, message.to())) {
+                        continue;
                     }
+                    try {
+                        this.store.confirmPendingDelivery(currentOwner, currentUser, api.send(message));
+                    } catch (PulseApi.ApiError e) {
+                        if (e.code != 400 && e.code != 404 && e.code != 409 && e.code != 413) {
+                            throw e;
+                        }
+                        this.store.markFailed(currentOwner, message);
+                        result = "Есть неотправленные сообщения";
+                    }
+                    changed = true;
                 }
                 for (int batch = 0; batch < 20; batch++) {
                     long before = this.store.cursor(currentOwner);
@@ -3860,22 +3689,28 @@ public final class MainActivity extends Activity {
                         break;
                     }
                     this.store.received(currentOwner, currentUser, incoming);
+                    changed = true;
                     if (this.store.cursor(currentOwner) <= before) {
                         break;
                     }
                 }
-            } catch (PulseApi.ApiError e2) {
-                result = e2.code == 401 ? "Войдите снова" : "Нет соединения с сервером";
+            } catch (PulseApi.ApiError e) {
+                result = e.code == 401 ? "Войдите снова" : "Нет соединения с сервером";
+            } catch (Exception e) {
+                result = "Нет соединения с сервером";
+            } finally {
+                this.syncing.set(false);
             }
-        } catch (Exception e3) {
-            result = "Нет соединения с сервером";
-        }
-        final String finalResult = result;
-        this.syncing.set(false);
-        this.handler.post(() -> MainActivity.this.syncStep93(currentOwner, finalResult));
+            final String finalResult = result;
+            final boolean finalChanged = changed;
+            this.handler.post(() -> applySyncResult(currentOwner, finalResult, finalChanged));
+
+        });
     }
 
-    public void syncStep93(String currentOwner, String finalResult) {
+    /** Фоновая синхронизация: отправляет очередь и забирает новые сообщения. UI обновляется, только если что-то изменилось. */
+
+    public void applySyncResult(String currentOwner, String finalResult, boolean changed) {
         if (isFinishing() || isDestroyed()) {
             return;
         }
@@ -3884,12 +3719,17 @@ public final class MainActivity extends Activity {
             if (currentOwner.equals(owner()) && (isMainPage() || this.peer != null)) {
                 showPullRefreshHint("Подключено".equals(finalResult) ? "Обновлено" : finalResult, true);
             } else {
-                this.pullRefreshHint.setVisibility(8);
+                this.pullRefreshHint.setVisibility(View.GONE);
             }
         }
-        if (currentOwner.equals(owner())) {
-            this.connectionStatus = finalResult;
-            updateStatus();
+        if (!currentOwner.equals(owner())) {
+            return;
+        }
+        boolean statusChanged = !finalResult.equals(this.connectionStatus);
+        this.connectionStatus = finalResult;
+        updateStatus();
+        // Раньше список перерисовывался каждые 6 секунд: сбрасывались свайпы и прыгала прокрутка.
+        if (changed || statusChanged) {
             if (this.peer == null) {
                 refreshChats();
             } else {
