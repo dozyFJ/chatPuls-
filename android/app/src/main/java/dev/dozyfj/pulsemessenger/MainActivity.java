@@ -53,7 +53,6 @@ import android.widget.FrameLayout;
 import android.widget.HorizontalScrollView;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
-import android.widget.PopupMenu;
 import android.widget.ScrollView;
 import android.widget.Switch;
 import android.widget.TextView;
@@ -184,6 +183,7 @@ public final class MainActivity extends Activity {
     private boolean pullingRefresh;
     private View pulseBrand;
     private TextView mainMenuButton;
+    private HorizontalScrollView mainSectionStrip;
     private File recordingFile;
     private String requestedVoicePeer;
     private boolean resumed;
@@ -662,7 +662,7 @@ public final class MainActivity extends Activity {
         this.mainMenuButton.setGravity(Gravity.CENTER);
         this.mainMenuButton.setFocusable(true);
         this.mainMenuButton.setBackground(glass(22));
-        this.mainMenuButton.setOnClickListener(this::showMainMenu);
+        this.mainMenuButton.setOnClickListener(v -> openMainWall());
         headingRow.addView(this.mainMenuButton, new LinearLayout.LayoutParams(dp(80.0f), dp(44.0f)));
         this.settingsTabs = buildSettingsTabs(headingRow);
         buildClipsTabs(headingRow);
@@ -728,6 +728,7 @@ public final class MainActivity extends Activity {
         this.headerAction = headerControl("↻");
         headingRow.addView(this.headerAction, new LinearLayout.LayoutParams(dp(38.0f), dp(40.0f)));
         buildSearchPanel(headerLine);
+        buildMainSections(column);
         buildProfileTabs(column);
         buildCallFilters(column);
         FrameLayout body = new FrameLayout(this);
@@ -1008,28 +1009,73 @@ public final class MainActivity extends Activity {
         return true;
     }
 
-    private void showMainMenu(View anchor) {
-        PopupMenu menu = new PopupMenu(this, anchor);
-        addMainMenuItem(menu, "Профиль", () -> {
-            this.openProfile = null;
-            this.friendsOpen = false;
-            this.feedSection = PROFILE_FEED;
-            openPage(6);
-        });
-        addMainMenuItem(menu, "Настройки", () -> openPage(2));
-        addMainMenuItem(menu, "Чаты", this::showMainMessages);
-        addMainMenuItem(menu, "Каналы", () -> selectAllChatsTab(2));
-        addMainMenuItem(menu, "Сообщества", () -> selectAllChatsTab(3));
-        addMainMenuItem(menu, "Контакты", () -> selectAllChatsTab(4));
-        addMainMenuItem(menu, "Звонки", () -> selectAllChatsTab(6));
-        addMainMenuItem(menu, "Клипы", () -> openPage(5));
-        menu.show();
+    private void openMainWall() {
+        this.openProfile = null;
+        this.friendsOpen = false;
+        this.feedSection = PROFILE_FEED;
+        openPage(6);
     }
 
-    private void addMainMenuItem(PopupMenu menu, String title, Runnable action) {
-        menu.getMenu().add(title).setOnMenuItemClickListener(item -> {
-            action.run();
-            return true;
+    private void buildMainSections(LinearLayout root) {
+        this.mainSectionStrip = new HorizontalScrollView(this);
+        this.mainSectionStrip.setHorizontalScrollBarEnabled(false);
+        this.mainSectionStrip.setClipToPadding(false);
+        this.mainSectionStrip.setPadding(dp(16.0f), dp(8.0f), dp(16.0f), 0);
+        LinearLayout row = new LinearLayout(this);
+        this.mainSectionStrip.addView(row, new FrameLayout.LayoutParams(-2, -2));
+        addMainSection(row, "Профиль", this::openMainWall);
+        addMainSection(row, "Настройки", () -> openPage(2));
+        addMainSection(row, "Чаты", this::showMainMessages);
+        addMainSection(row, "Каналы", () -> selectAllChatsTab(2));
+        addMainSection(row, "Сообщества", () -> selectAllChatsTab(3));
+        addMainSection(row, "Контакты", () -> selectAllChatsTab(4));
+        addMainSection(row, "Звонки", () -> selectAllChatsTab(6));
+        addMainSection(row, "Клипы", () -> openPage(5));
+        root.addView(this.mainSectionStrip, new LinearLayout.LayoutParams(-1, -2));
+    }
+
+    private void addMainSection(LinearLayout row, String label, Runnable action) {
+        TextView tab = text(label, 14, ink(), true);
+        tab.setGravity(Gravity.CENTER);
+        tab.setPadding(dp(14.0f), 0, dp(14.0f), 0);
+        tab.setFocusable(true);
+        tab.setOnClickListener(v -> action.run());
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-2, dp(44.0f));
+        if (row.getChildCount() > 0) {
+            params.setMarginStart(dp(6.0f));
+        }
+        row.addView(tab, params);
+    }
+
+    private void renderMainSections() {
+        boolean visible = this.peer == null && !this.searchMode;
+        this.mainSectionStrip.setVisibility(visible ? View.VISIBLE : View.GONE);
+        if (!visible) {
+            return;
+        }
+        int selected;
+        switch (this.page) {
+            case 2: selected = 1; break;
+            case 0: selected = this.allChatsTab == 2 ? 3 : 2; break;
+            case 4: selected = 4; break;
+            case 1: selected = 5; break;
+            case 7: selected = 6; break;
+            case 5: selected = 7; break;
+            default: selected = 0;
+        }
+        LinearLayout row = (LinearLayout) this.mainSectionStrip.getChildAt(0);
+        for (int i = 0; i < row.getChildCount(); i++) {
+            TextView tab = (TextView) row.getChildAt(i);
+            boolean active = i == selected;
+            tab.setSelected(active);
+            tab.setTextColor(active ? onAccent() : ink());
+            tab.setBackground(active ? accentPill(22) : surface(0, 22, surfaceOutline()));
+        }
+        row.getChildAt(selected).post(() -> {
+            View tab = row.getChildAt(selected);
+            if (tab.isSelected() && tab.isShown()) {
+                tab.requestRectangleOnScreen(new Rect(0, 0, tab.getWidth(), tab.getHeight()), true);
+            }
         });
     }
 
@@ -1061,6 +1107,7 @@ public final class MainActivity extends Activity {
         updateStatus();
         updateHeader();
         this.pulseBrand.setVisibility(isMainPage() && this.peer == null ? View.VISIBLE : View.GONE);
+        renderMainSections();
         renderProfileTabs();
         renderCallFilters();
         renderSectionTabs();
