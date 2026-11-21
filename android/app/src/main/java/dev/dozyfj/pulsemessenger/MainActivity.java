@@ -561,7 +561,7 @@ public final class MainActivity extends Activity {
     }
 
     private Drawable headerSurface() {
-        return barSurface(this.dark ? 0xFF222426 : 0xFFE6E9EC, 80);
+        return barSurface(this.dark ? 0xC71C1E21 : 0xC7EEF1F4, 80);
     }
 
     private int surfaceOutline() {
@@ -569,8 +569,19 @@ public final class MainActivity extends Activity {
     }
 
     private GradientDrawable card() {
-        int fill = this.dark ? 0xFF292B2E : 0xFFF0F2F4;
-        return surface(fill, 14, surfaceOutline());
+        return glass(14);
+    }
+
+    /**
+     * Стекло (glassmorphism): полупрозрачная заливка с лёгким градиентом сверху вниз и светлой
+     * «бликовой» обводкой. Сквозь него виден цветной фон с узором.
+     */
+    private GradientDrawable glass(int radius) {
+        GradientDrawable shape = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, this.dark
+                ? new int[]{0x7A34373C, 0x5C202226} : new int[]{0xC7FFFFFF, 0x9EFFFFFF});
+        shape.setCornerRadius(dp(radius));
+        shape.setStroke(dp(1.0f), this.dark ? 0x38FFFFFF : 0xB3FFFFFF);
+        return shape;
     }
 
     private LinearLayout column() {
@@ -787,7 +798,7 @@ public final class MainActivity extends Activity {
         this.dock = new LinearLayout(this);
         this.dock.setGravity(Gravity.CENTER_VERTICAL);
         this.dock.setPadding(dp(4.0f), dp(3.0f), dp(4.0f), dp(3.0f));
-        int dockColor = this.dark ? 0xFF242628 : 0xFFE9EDF0;
+        int dockColor = this.dark ? 0xC71C1E21 : 0xC7EEF1F4;
         this.dock.setBackground(barSurface(dockColor, 48));
         column.addView(this.dock, new LinearLayout.LayoutParams(-1, -2));
         buildFeedDrawer(frameLayout, background);
@@ -1885,7 +1896,7 @@ public final class MainActivity extends Activity {
         this.feedSectionViewport = new HorizontalScrollView(this);
         this.feedSectionViewport.setHorizontalScrollBarEnabled(false);
         this.feedSectionViewport.setFillViewport(true);
-        this.feedSectionViewport.setBackground(surface(this.dark ? 0xFF242628 : 0xFFE9EDF0, 24, surfaceOutline()));
+        this.feedSectionViewport.setBackground(glass(24));
         this.feedSectionViewport.setClipToOutline(true);
         this.feedSectionTabs = new SlidingTabs(accentPill(22));
         this.feedSectionViewport.addView(this.feedSectionTabs, new FrameLayout.LayoutParams(-2, -2));
@@ -2624,7 +2635,7 @@ public final class MainActivity extends Activity {
         this.content.addView(head);
         final EditText search = field("Найти людей по chatId", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
         search.setText(this.peopleQuery);
-        search.setBackground(surface(this.dark ? 0xFF2A2C2F : 0xFFF7F8FA, 16, surfaceOutline()));
+        search.setBackground(glass(16));
         search.setPadding(dp(14.0f), dp(10.0f), dp(14.0f), dp(10.0f));
         LinearLayout.LayoutParams searchParams = new LinearLayout.LayoutParams(-1, -2);
         searchParams.bottomMargin = dp(10.0f);
@@ -2730,7 +2741,7 @@ public final class MainActivity extends Activity {
         serverCall("/v1/profile?name=" + Uri.encode(name), null, profile -> {
             holder.removeAllViews();
             LinearLayout card = column();
-            card.setBackground(surface(this.dark ? 0xFF222426 : 0xFFF7F8FA, 22, surfaceOutline()));
+            card.setBackground(glass(22));
             card.setClipToOutline(true);
             LinearLayout.LayoutParams cardParams = new LinearLayout.LayoutParams(-1, -2);
             cardParams.bottomMargin = dp(12.0f);
@@ -3340,7 +3351,7 @@ public final class MainActivity extends Activity {
     private LinearLayout showMyWall(LinearLayout parent) {
         final String key = wallProfileKey();
         LinearLayout card = column();
-        card.setBackground(surface(this.dark ? 0xFF222426 : 0xFFF7F8FA, 22, surfaceOutline()));
+        card.setBackground(glass(22));
         card.setClipToOutline(true);
         LinearLayout.LayoutParams cardParams = new LinearLayout.LayoutParams(-1, -2);
         cardParams.bottomMargin = dp(12.0f);

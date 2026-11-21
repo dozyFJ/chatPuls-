@@ -26,10 +26,32 @@ final class DoodleBackground extends Drawable {
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
     private Bitmap tile;
 
+    private final boolean dark;
+    private final Paint blobs = new Paint(Paint.ANTI_ALIAS_FLAG);
+
     DoodleBackground(Context context, int base, int ink) {
         this.context = context.getApplicationContext();
         this.base = base;
         this.ink = ink;
+        this.dark = android.graphics.Color.luminance(base) < 0.3f;
+    }
+
+    /** Мягкие цветные пятна под узором — на них «стекло» карточек выглядит объёмно. */
+    private void drawBlobs(Canvas canvas) {
+        android.graphics.Rect b = getBounds();
+        float w = b.width();
+        float h = b.height();
+        int[] colors = this.dark
+                ? new int[]{0x66603A9E, 0x55206E78, 0x4D9E3A6A}
+                : new int[]{0x8CB9A7FF, 0x7A9FD8FF, 0x73FFC6A8};
+        float[][] spots = {{0.15f, 0.18f, 0.75f}, {0.9f, 0.45f, 0.7f}, {0.3f, 0.88f, 0.8f}};
+        for (int i = 0; i < spots.length; i++) {
+            float cx = b.left + w * spots[i][0];
+            float cy = b.top + h * spots[i][1];
+            float radius = Math.max(w, h) * spots[i][2] * 0.6f;
+            this.blobs.setShader(new android.graphics.RadialGradient(cx, cy, radius, colors[i], colors[i] & 0x00FFFFFF, Shader.TileMode.CLAMP));
+            canvas.drawCircle(cx, cy, radius, this.blobs);
+        }
     }
 
     private int dp(float value) {
@@ -79,6 +101,7 @@ final class DoodleBackground extends Drawable {
     @Override
     public void draw(Canvas canvas) {
         canvas.drawColor(this.base);
+        drawBlobs(canvas);
         if (this.tile == null) {
             this.tile = buildTile();
             this.paint.setShader(new BitmapShader(this.tile, Shader.TileMode.REPEAT, Shader.TileMode.REPEAT));
