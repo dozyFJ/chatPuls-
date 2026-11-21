@@ -76,6 +76,18 @@ jobs:
           name: PulseMessenger-${{ steps.apk.outputs.version }}
           path: out/*.apk
 
+      - name: Выложить APK в GitHub Releases
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="v${{ steps.apk.outputs.version }}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" out/*.apk --clobber
+          else
+            gh release create "$TAG" out/*.apk --target "$GITHUB_SHA" --title "Pulse Messenger ${{ steps.apk.outputs.version }}" --notes "Сборка ${{ steps.signing.outputs.dir }} из коммита $GITHUB_SHA"
+          fi
+
       - name: Опубликовать OTA-обновление
         if: ${{ inputs.publish && steps.signing.outputs.dir == 'release' }}
         run: |
