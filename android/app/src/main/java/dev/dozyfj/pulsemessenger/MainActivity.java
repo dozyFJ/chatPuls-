@@ -39,6 +39,7 @@ import android.text.format.DateFormat;
 import android.text.format.DateUtils;
 import android.util.Base64;
 import android.util.Patterns;
+import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
@@ -149,9 +150,6 @@ public final class MainActivity extends Activity {
     private FrameLayout feedOverlay;
     private LinearLayout feedPanel;
     private int feedSection;
-    private boolean feedSectionSwipe;
-    private SlidingTabs feedSectionTabs;
-    private HorizontalScrollView feedSectionViewport;
     private TextView headerAction;
     private TextView headerBack;
     private TextView headerTitle;
@@ -163,6 +161,7 @@ public final class MainActivity extends Activity {
     private boolean notificationDrawer;
     private SlidingTabs notificationTabs;
     private ImageView notificationsButton;
+    private TextView settingsShortcut;
     private String peer;
     private PhoneHost phoneHost;
     private String photoProfileKey;
@@ -219,9 +218,6 @@ public final class MainActivity extends Activity {
     private boolean watchTabSwipe;
     private static final int[] ALL_CHATS_ORDER = {5, 0, 2, 3, 4, 6};
     private static final String[] ALL_CHATS_LABELS = {"Чаты", "Группы", "Каналы", "Сообщества", "Контакты", "Фид", "Звонки"};
-    private static final String[] FEED_SECTIONS = {"Мой профиль", "Чаты", "Каналы", "Сообщества", "Контакты", "Звонки"};
-    private static final int[] FEED_SECTION_TABS = {-1, 0, 2, 3, 4, 6};
-    private static final int[] FEED_SECTION_ICONS = {R.drawable.ic_feed_profile, R.drawable.ic_pulse_mark, R.drawable.ic_feed_channels, R.drawable.ic_community_rail, R.drawable.ic_feed_profile, R.drawable.ic_audio_call};
     private static final String[] PROFILE_SECTIONS = {"Стена", "Фотоальбом", "Реки"};
     private static final int PROFILE_FEED = 0;
     private static final int PROFILE_ALBUM = 1;
@@ -231,7 +227,6 @@ public final class MainActivity extends Activity {
     private static final String[] SETTINGS_ICONS = {"⚙", "♙", "▤"};
     private int page = 0;
     private int chatFilter = 0;
-    private final ImageView[] feedSectionChoices = new ImageView[FEED_SECTIONS.length];
     private int settingsTab = 0;
     private final TextView[] clipsChoices = new TextView[2];
     private final TextView[] settingsChoices = new TextView[3];
@@ -662,6 +657,11 @@ public final class MainActivity extends Activity {
         headerLine.addView(this.pulseBrand, new FrameLayout.LayoutParams(-2, dp(40.0f), Gravity.CENTER));
         this.headerBack = headerControl("‹");
         headingRow.addView(this.headerBack, new LinearLayout.LayoutParams(dp(40.0f), dp(40.0f)));
+        this.settingsShortcut = headerControl("⚙");
+        this.settingsShortcut.setContentDescription("Настройки");
+        this.settingsShortcut.setTooltipText("Настройки");
+        this.settingsShortcut.setOnClickListener(v -> openDockPage(2));
+        headingRow.addView(this.settingsShortcut, new LinearLayout.LayoutParams(dp(44.0f), dp(44.0f)));
         this.settingsTabs = buildSettingsTabs(headingRow);
         buildClipsTabs(headingRow);
         LinearLayout heading = column();
@@ -787,7 +787,6 @@ public final class MainActivity extends Activity {
         body.addView(this.pullRefreshHint, new FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL));
         this.compose = column();
         column.addView(this.compose, new LinearLayout.LayoutParams(-1, -2));
-        buildFeedSectionTabs(column);
         this.dock = new LinearLayout(this);
         this.dock.setGravity(Gravity.CENTER_VERTICAL);
         this.dock.setPadding(dp(4.0f), dp(3.0f), dp(4.0f), dp(3.0f));
@@ -820,8 +819,7 @@ public final class MainActivity extends Activity {
                 this.tabSwipeHandled = false;
                 this.swipeX = event.getRawX();
                 this.swipeY = event.getRawY();
-                this.feedSectionSwipe = !this.feedOpen && containsTouch(this.feedSectionViewport, event);
-                this.canPullRefresh = !this.feedSectionSwipe && !this.feedOpen && !this.waitingForRefresh
+                this.canPullRefresh = !this.feedOpen && !this.waitingForRefresh
                         && (isMainPage() || this.peer != null)
                         && containsTouch(this.scroll, event) && !this.scroll.canScrollVertically(1)
                         && !containsTouch(this.alphabetRail, event) && !containsTouch(this.createButton, event)
@@ -848,9 +846,9 @@ public final class MainActivity extends Activity {
                     this.watchDrawerSwipe = containsTouch(this.feedHeader, event);
                 } else {
                     this.watchDrawerSwipe = this.swipeX <= dp(28.0f) && !onHeaderTabs && !onDock
-                            && !this.feedSectionSwipe && !containsTouch(this.headerBack, event);
+                            && !containsTouch(this.headerBack, event);
                 }
-                this.watchTabSwipe = !this.feedSectionSwipe && !this.feedOpen && !this.watchDrawerSwipe && this.peer == null
+                this.watchTabSwipe = !this.feedOpen && !this.watchDrawerSwipe && this.peer == null
                         && !containsTouch(this.alphabetRail, event) && (this.mainBodySwipe || onHeaderTabs);
                 break;
             }
@@ -894,7 +892,7 @@ public final class MainActivity extends Activity {
                         this.canPullRefresh = false;
                     }
                 }
-                if (this.watchTabSwipe || this.watchDrawerSwipe || this.feedSectionSwipe) {
+                if (this.watchTabSwipe || this.watchDrawerSwipe) {
                     float dx = event.getRawX() - this.swipeX;
                     float dy = Math.abs(event.getRawY() - this.swipeY);
                     if (dy > dp(20.0f) && dy > Math.abs(dx)) {
@@ -904,9 +902,7 @@ public final class MainActivity extends Activity {
                     int drawerDistance = dp(40.0f);
                     boolean drawerGesture = this.watchDrawerSwipe && (this.feedOpen ? dx <= -drawerDistance : dx >= drawerDistance);
                     boolean tabGesture = this.watchTabSwipe && Math.abs(dx) >= this.tabSwipeDistance;
-                    boolean feedGesture = this.feedSectionSwipe && Math.abs(dx) >= dp(24.0f) && Math.abs(dx) > dy * 1.5f;
-                    if (feedGesture || ((tabGesture || drawerGesture) && Math.abs(dx) > dy * 1.5f)) {
-                        this.feedSectionSwipe = false;
+                    if ((tabGesture || drawerGesture) && Math.abs(dx) > dy * 1.5f) {
                         this.watchTabSwipe = false;
                         this.watchDrawerSwipe = false;
                         this.tabSwipeHandled = !finished;
@@ -915,10 +911,6 @@ public final class MainActivity extends Activity {
                         super.dispatchTouchEvent(cancel);
                         cancel.recycle();
                         int step = dx < 0.0f ? 1 : -1;
-                        if (feedGesture) {
-                            selectFeedSection(activeFeedSection() + step);
-                            return true;
-                        }
                         if (drawerGesture) {
                             if (this.feedOpen) {
                                 hideFeedDrawer();
@@ -940,7 +932,6 @@ public final class MainActivity extends Activity {
                     }
                 }
                 if (finished) {
-                    this.feedSectionSwipe = false;
                     this.watchDrawerSwipe = false;
                     this.watchTabSwipe = false;
                 }
@@ -948,7 +939,6 @@ public final class MainActivity extends Activity {
             }
             case MotionEvent.ACTION_CANCEL:
             case MotionEvent.ACTION_POINTER_DOWN:
-                this.feedSectionSwipe = false;
                 if (this.pullingRefresh) {
                     this.pullRefreshHint.setVisibility(View.GONE);
                 }
@@ -1016,7 +1006,7 @@ public final class MainActivity extends Activity {
         return true;
     }
 
-    private void addDock(String symbol, Bitmap avatar, String label, boolean selected, final Runnable click) {
+    private void addDock(int iconResource, Bitmap avatar, String label, boolean selected, final Runnable click) {
         LinearLayout item = column();
         item.setGravity(Gravity.CENTER);
         item.setPadding(dp(2.0f), dp(2.0f), dp(2.0f), dp(2.0f));
@@ -1034,9 +1024,10 @@ public final class MainActivity extends Activity {
         icon.setBackground(circle);
         icon.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);
         if (avatar == null) {
-            TextView glyph = text(symbol, 21, iconColor, true);
-            glyph.setGravity(Gravity.CENTER);
-            icon.addView(glyph, new FrameLayout.LayoutParams(-1, -1));
+            ImageView glyph = new ImageView(this);
+            glyph.setImageResource(iconResource);
+            glyph.setImageTintList(ColorStateList.valueOf(iconColor));
+            icon.addView(glyph, new FrameLayout.LayoutParams(dp(21.0f), dp(21.0f), Gravity.CENTER));
         } else {
             ImageView photo = new ImageView(this);
             photo.setImageBitmap(avatar);
@@ -1051,9 +1042,10 @@ public final class MainActivity extends Activity {
         TextView name = text(label, 11, selected ? accent() : muted(), selected);
         name.setSingleLine(true);
         name.setGravity(Gravity.CENTER);
+        name.setAutoSizeTextTypeUniformWithConfiguration(8, 11, 1, TypedValue.COMPLEX_UNIT_SP);
         name.setImportantForAccessibility(2);
         item.addView(icon, new LinearLayout.LayoutParams(dp(34.0f), dp(34.0f)));
-        item.addView(name);
+        item.addView(name, new LinearLayout.LayoutParams(-1, dp(16.0f)));
         item.setOnClickListener(view -> click.run());
         this.dock.addView(item, new LinearLayout.LayoutParams(0, -2, 1.0f));
     }
@@ -1074,6 +1066,8 @@ public final class MainActivity extends Activity {
         this.voiceButton = null;
         this.revealedChat = null;
         this.content.removeAllViews();
+        this.content.setClipChildren(true);
+        this.content.setClipToPadding(true);
         this.compose.removeAllViews();
         this.dock.removeAllViews();
         this.list = null;
@@ -1088,7 +1082,6 @@ public final class MainActivity extends Activity {
         updateStatus();
         updateHeader();
         this.pulseBrand.setVisibility(isMainPage() && this.peer == null ? View.VISIBLE : View.GONE);
-        renderFeedSectionTabs();
         renderCallFilters();
         renderSectionTabs();
         boolean showEmptySection = this.page == 0 && isMainSectionOpen() && this.allChatsTab != 0;
@@ -1110,15 +1103,17 @@ public final class MainActivity extends Activity {
         int reservedBottom = showFab ? 86 : 12;
         this.content.setPadding(dp(16.0f), dp(12.0f), dp(16.0f), dp(reservedBottom));
         this.dock.setVisibility(this.peer == null ? View.VISIBLE : View.GONE);
-        addDock("♙", loadProfilePhoto(wallProfileKey()), "Профиль", this.page == 6, () -> {
+        addDock(R.drawable.ic_feed_profile, loadProfilePhoto(wallProfileKey()), "Профиль", this.page == 6, () -> {
             this.openProfile = null;
             this.friendsOpen = false;
             openDockPage(6);
         });
-        addDock("⚙", null, "Настройки", this.page == 2, () -> openDockPage(2));
-        addDock("◉", null, "Чаты", this.page == 0 || this.page == 1 || this.page == 4, this::showMainMessages);
-        addDock("☎", null, "Звонки", this.page == 7, () -> openDockPage(7));
-        addDock("▶", null, "Клипы", this.page == 5, () -> openDockPage(5));
+        int activeTab = isMainPage() ? activeChatsTab() : -1;
+        addDock(R.drawable.ic_pulse_mark, null, "Чаты", activeTab == 0, this::showMainMessages);
+        addDock(R.drawable.ic_feed_channels, null, "Каналы", activeTab == 2, () -> selectAllChatsTab(2));
+        addDock(R.drawable.ic_community_rail, null, "Сообщества", activeTab == 3, () -> selectAllChatsTab(3));
+        addDock(R.drawable.ic_feed_profile, null, "Контакты", activeTab == 4, () -> selectAllChatsTab(4));
+        addDock(R.drawable.ic_audio_call, null, "Звонки", activeTab == 6, () -> selectAllChatsTab(6));
         if (this.searchMode && this.peer == null) {
             showSearchResults();
         } else if (this.peer != null) {
@@ -1646,7 +1641,7 @@ public final class MainActivity extends Activity {
         this.feedContent.removeAllViews();
         if (!this.notificationDrawer) {
             showStories(this.feedContent);
-            showMyWall(this.feedContent);
+            showMyWall(this.feedContent, false);
             return;
         }
         this.alertsChoice.setSelected(!this.eventsSelected);
@@ -1861,106 +1856,14 @@ public final class MainActivity extends Activity {
         return "wall." + owner() + ".";
     }
 
-    private void buildFeedSectionTabs(LinearLayout root) {
-        this.feedSectionViewport = new HorizontalScrollView(this);
-        this.feedSectionViewport.setHorizontalScrollBarEnabled(false);
-        this.feedSectionViewport.setFillViewport(true);
-        this.feedSectionViewport.setBackground(glass(24));
-        this.feedSectionViewport.setClipToOutline(true);
-        this.feedSectionTabs = new SlidingTabs(accentPill(22));
-        this.feedSectionViewport.addView(this.feedSectionTabs, new FrameLayout.LayoutParams(-2, -2));
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, -2);
-        params.setMargins(dp(8.0f), dp(4.0f), dp(8.0f), dp(6.0f));
-        root.addView(this.feedSectionViewport, params);
-        LinearLayout row = new LinearLayout(this);
-        row.setPadding(dp(3.0f), dp(3.0f), dp(3.0f), dp(3.0f));
-        row.setGravity(Gravity.CENTER_HORIZONTAL);
-        this.feedSectionTabs.addView(row, new FrameLayout.LayoutParams(-1, -2));
-        for (int i = 0; i < FEED_SECTIONS.length; i++) {
-            final int index = i;
-            ImageView choice = new ImageView(this);
-            choice.setImageResource(FEED_SECTION_ICONS[i]);
-            choice.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
-            choice.setPadding(dp(9.0f), dp(10.0f), dp(9.0f), dp(10.0f));
-            choice.setContentDescription(FEED_SECTIONS[i]);
-            choice.setTooltipText(FEED_SECTIONS[i]);
-            choice.setFocusable(true);
-            choice.setOnClickListener(v -> selectFeedSection(index));
-            row.addView(choice, new LinearLayout.LayoutParams(dp(44.0f), dp(46.0f)));
-            this.feedSectionChoices[i] = choice;
-        }
-        row.addOnLayoutChangeListener((view, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom) -> {
-            if (this.feedSectionTabs.isShown() && right - left != oldRight - oldLeft) {
-                this.feedSectionTabs.moveTo(this.feedSectionChoices[activeFeedSection()], false);
-            }
-
-        });
-    }
-
-    private int activeFeedSection() {
-        if (this.page == 6) {
-            return 0;
-        }
-        int tab = activeChatsTab();
-        for (int i = 1; i < FEED_SECTION_TABS.length; i++) {
-            if (FEED_SECTION_TABS[i] == tab) {
-                return i;
-            }
-        }
-        return 1;
-    }
-
-    private void selectFeedSection(int index) {
-        if (index < 0 || index >= FEED_SECTIONS.length) {
-            return;
-        }
-        if (index >= 1) {
-            selectAllChatsTab(FEED_SECTION_TABS[index]);
-        } else if (this.page != 6 || this.feedSection != index) {
-            this.feedSection = index;
-            if (this.page != 6) {
-                selectAllChatsTab(5);
-            } else {
-                render();
-            }
-        }
-    }
-
-    private void renderFeedSectionTabs() {
-        boolean visible = this.peer == null && isMainPage();
-        boolean wasVisible = this.feedSectionViewport.getVisibility() == View.VISIBLE;
-        this.feedSectionViewport.setVisibility(visible ? View.VISIBLE : View.GONE);
-        if (visible) {
-            final int active = activeFeedSection();
-            int i = 0;
-            while (i < this.feedSectionChoices.length) {
-                ImageView choice = this.feedSectionChoices[i];
-                choice.setSelected(i == active);
-                choice.setImageTintList(ColorStateList.valueOf(i == active ? onAccent() : ink()));
-                i++;
-            }
-            final View selected = this.feedSectionChoices[active];
-            this.feedSectionTabs.moveTo(selected, wasVisible);
-            this.feedSectionViewport.post(() -> {
-                if (!this.feedSectionViewport.isShown() || activeFeedSection() != active) {
-                    return;
-                }
-                int left = this.feedSectionViewport.getScrollX();
-                int width = this.feedSectionViewport.getWidth();
-                if (selected.getLeft() < left || selected.getRight() > left + width) {
-                    this.feedSectionViewport.smoothScrollTo(selected.getLeft() - ((width - selected.getWidth()) / 2), 0);
-                }
-
-            });
-        }
-    }
-
     private void showFeedPage() {
         if (this.feedSection < 0 || this.feedSection >= PROFILE_SECTIONS.length) {
             this.feedSection = PROFILE_FEED;
         }
         showStories(this.content);
-        LinearLayout profile = showMyWall(this.content);
+        this.content.setClipChildren(false);
+        this.content.setClipToPadding(false);
+        LinearLayout profile = showMyWall(this.content, true);
 
         LinearLayout sections = new LinearLayout(this);
         LinearLayout.LayoutParams row = new LinearLayout.LayoutParams(-1, -2);
@@ -3318,11 +3221,12 @@ public final class MainActivity extends Activity {
     }
 
     /** Шапка профиля: фон (своё фото), аватар поверх фона, chatId и почта. */
-    private LinearLayout showMyWall(LinearLayout parent) {
+    private LinearLayout showMyWall(LinearLayout parent, boolean fullWidthCover) {
         final String key = wallProfileKey();
         LinearLayout card = column();
         card.setBackground(glass(22));
-        card.setClipToOutline(true);
+        card.setClipToOutline(!fullWidthCover);
+        card.setClipChildren(!fullWidthCover);
         LinearLayout.LayoutParams cardParams = new LinearLayout.LayoutParams(-1, -2);
         cardParams.bottomMargin = dp(12.0f);
         parent.addView(card, cardParams);
@@ -3356,7 +3260,13 @@ public final class MainActivity extends Activity {
         FrameLayout.LayoutParams changeParams = new FrameLayout.LayoutParams(-2, dp(32.0f), Gravity.TOP | Gravity.END);
         changeParams.setMargins(0, dp(10.0f), dp(10.0f), 0);
         cover.addView(changeCover, changeParams);
-        card.addView(cover, new LinearLayout.LayoutParams(-1, dp(150.0f)));
+        LinearLayout.LayoutParams coverParams = new LinearLayout.LayoutParams(-1, dp(150.0f));
+        if (fullWidthCover) {
+            coverParams.leftMargin = -parent.getPaddingLeft();
+            coverParams.rightMargin = -parent.getPaddingRight();
+            changeParams.setMarginEnd(dp(10.0f) + parent.getPaddingEnd());
+        }
+        card.addView(cover, coverParams);
 
         LinearLayout details = new LinearLayout(this);
         details.setGravity(Gravity.BOTTOM);
@@ -4484,6 +4394,9 @@ public final class MainActivity extends Activity {
 
     private void showAppSettings() {
         LinearLayout card = newCard();
+        Button clips = button("Клипы", false);
+        clips.setOnClickListener(v -> openDockPage(5));
+        card.addView(clips);
         Switch theme = new Switch(this);
         theme.setText("Тёмная тема");
         theme.setTextColor(ink());
@@ -5128,6 +5041,7 @@ public final class MainActivity extends Activity {
         }
         boolean chatHeader = this.peer == null && isMainPage();
         this.headerTitle.setVisibility(this.peer != null ? View.VISIBLE : View.GONE);
+        this.settingsShortcut.setVisibility(chatHeader ? View.VISIBLE : View.GONE);
         this.notificationsButton.setVisibility(chatHeader ? View.VISIBLE : View.GONE);
         this.searchButton.setVisibility(chatHeader ? View.VISIBLE : View.GONE);
         this.headerBack.setVisibility(this.peer != null ? View.VISIBLE : View.GONE);
