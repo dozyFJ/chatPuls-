@@ -32,6 +32,7 @@ import android.os.Looper;
 import android.provider.ContactsContract;
 import android.text.Editable;
 import android.text.InputFilter;
+import android.text.InputType;
 import android.text.TextUtils;
 import android.text.TextWatcher;
 import android.text.format.DateFormat;
@@ -72,6 +73,7 @@ import java.net.SocketTimeoutException;
 import java.nio.file.Files;
 import java.nio.file.OpenOption;
 import java.util.Arrays;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashSet;
@@ -169,6 +171,7 @@ public final class MainActivity extends Activity {
     private String peer;
     private PhoneHost phoneHost;
     private String photoProfileKey;
+    private String photoField = "photo";
     private File playingFile;
     private SharedPreferences preferences;
     private TextView pullRefreshHint;
@@ -209,8 +212,11 @@ public final class MainActivity extends Activity {
     private static final String[] FEED_SECTIONS = {"Мой профиль", "Чаты", "Каналы", "Сообщества", "Контакты", "Звонки"};
     private static final int[] FEED_SECTION_TABS = {-1, 0, 2, 3, 4, 6};
     private static final int[] FEED_SECTION_ICONS = {R.drawable.ic_feed_profile, R.drawable.ic_pulse_mark, R.drawable.ic_feed_channels, R.drawable.ic_community_rail, R.drawable.ic_feed_profile, R.drawable.ic_audio_call};
-    private static final String[] PROFILE_SECTIONS = {"Стена", "Фотоальбомы", "Реки"};
-    private static final String[] PROFILE_SECTION_EMPTY = {"Публикаций пока нет.", "Фотоальбомов пока нет.", "Рекомендаций пока нет."};
+    private static final String[] PROFILE_SECTIONS = {"Лента", "Стена", "Фотоальбом"};
+    private static final int PROFILE_FEED = 0;
+    private static final int PROFILE_WALL = 1;
+    private static final int PROFILE_ALBUM = 2;
+    private static final int ALBUM_PICKER = 47;
     private static final String[] SETTINGS_TABS = {"Приложение", "Аккаунт", "Сервер"};
     private static final String[] SETTINGS_ICONS = {"⚙", "♙", "▤"};
     private int page = 0;
@@ -329,6 +335,7 @@ public final class MainActivity extends Activity {
             this.peer = bundle.getString("peer");
             this.awaitingInstallPermission = bundle.getBoolean("awaitingInstallPermission", false);
             this.photoProfileKey = bundle.getString("photoProfileKey");
+            this.photoField = bundle.getString("photoField", "photo");
             boolean legacyFeedPage = this.page == 3 && !bundle.containsKey("feedOpen");
             if (!bundle.getBoolean("feedOpen") && !legacyFeedPage) {
                 z = false;
@@ -411,6 +418,7 @@ public final class MainActivity extends Activity {
     @Override
     protected void onSaveInstanceState(Bundle state) {
         state.putString("photoProfileKey", this.photoProfileKey);
+        state.putString("photoField", this.photoField);
         state.putInt("allChatsTab", this.allChatsTab);
         state.putBoolean("sectionArchive", this.sectionArchive);
         state.putInt("callFilter", this.callFilter.ordinal());
@@ -580,7 +588,8 @@ public final class MainActivity extends Activity {
     private void buildShell() {
         LinearLayout column = column();
         int background = this.dark ? 0xFF191A1C : 0xFFDDE2E7;
-        column.setBackgroundColor(background);
+        // Серый фон с узором из иконок (чаты, трубки, контакты), как в Telegram.
+        column.setBackground(new DoodleBackground(this, background, this.dark ? 0x1CFFFFFF : 0x24404855));
         FrameLayout frameLayout = new FrameLayout(this);
         frameLayout.addView(column, new FrameLayout.LayoutParams(-1, -1));
         setContentView(frameLayout);
@@ -1871,10 +1880,13 @@ public final class MainActivity extends Activity {
     }
 
     private void showFeedPage() {
+        if (this.feedSection < 0 || this.feedSection >= PROFILE_SECTIONS.length) {
+            this.feedSection = PROFILE_FEED;
+        }
         LinearLayout banner = showMyWall(this.content);
         LinearLayout sections = new LinearLayout(this);
         LinearLayout.LayoutParams row = new LinearLayout.LayoutParams(-1, -2);
-        row.topMargin = dp(12.0f);
+        row.setMargins(dp(16.0f), dp(12.0f), dp(16.0f), dp(16.0f));
         banner.addView(sections, row);
         for (int i = 0; i < PROFILE_SECTIONS.length; i++) {
             final int section = i;
@@ -1885,7 +1897,6 @@ public final class MainActivity extends Activity {
                 }
                 this.feedSection = section;
                 render();
-
             });
             choice.setSelected(selected);
             choice.setTextColor(selected ? onAccent() : ink());
@@ -1896,32 +1907,337 @@ public final class MainActivity extends Activity {
                 params.setMarginStart(dp(6.0f));
             }
         }
-        TextView empty = text(PROFILE_SECTION_EMPTY[this.feedSection], 13, muted(), false);
-        LinearLayout.LayoutParams result = new LinearLayout.LayoutParams(-1, -2);
-        result.topMargin = dp(10.0f);
-        banner.addView(empty, result);
+        if (this.feedSection == PROFILE_WALL) {
+            showWallPosts(true);
+        } else if (this.feedSection == PROFILE_ALBUM) {
+            showAlbum();
+        } else {
+            showStories(this.content);
+            showWallPosts(false);
+        }
     }
 
+    // ---- Стена: свои записи (пока хранятся на устройстве) ----
+
+    private String wallPostsKey() {
+        return wallProfileKey() + "posts";
+    }
+
+    private org.json.JSONArray wallPosts() {
+        try {
+            return new org.json.JSONArray(this.preferences.getString(wallPostsKey(), "[]"));
+        } catch (JSONException e) {
+            return new org.json.JSONArray();
+        }
+    }
+
+    private void showWallPosts(boolean composer) {
+        if (composer) {
+            LinearLayout card = newCard();
+            final EditText input = field("Что у вас нового?", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
+            input.setSingleLine(false);
+            input.setMaxLines(6);
+            input.setFilters(new InputFilter[]{new InputFilter.LengthFilter(2000)});
+            card.addView(input, new LinearLayout.LayoutParams(-1, -2));
+            Button publish = button("Опубликовать", true);
+            LinearLayout.LayoutParams publishParams = new LinearLayout.LayoutParams(-1, -2);
+            publishParams.topMargin = dp(8.0f);
+            card.addView(publish, publishParams);
+            publish.setOnClickListener(v -> {
+                String value = input.getText().toString().trim();
+                if (value.isEmpty()) {
+                    return;
+                }
+                org.json.JSONArray posts = wallPosts();
+                org.json.JSONArray next = new org.json.JSONArray();
+                try {
+                    next.put(new JSONObject().put("text", value).put("time", System.currentTimeMillis()));
+                    for (int i = 0; i < posts.length() && i < 199; i++) {
+                        next.put(posts.get(i));
+                    }
+                } catch (JSONException e) {
+                    return;
+                }
+                this.preferences.edit().putString(wallPostsKey(), next.toString()).apply();
+                render();
+            });
+        }
+        org.json.JSONArray posts = wallPosts();
+        if (posts.length() == 0) {
+            newCard().addView(text(composer ? "Записей на стене пока нет. Напишите первую." : "В ленте пока пусто: здесь появятся ваши записи и истории.", 14, muted(), false));
+            return;
+        }
+        for (int i = 0; i < posts.length(); i++) {
+            JSONObject post = posts.optJSONObject(i);
+            if (post == null) {
+                continue;
+            }
+            final long time = post.optLong("time");
+            LinearLayout card = newCard();
+            LinearLayout head = new LinearLayout(this);
+            head.setGravity(Gravity.CENTER_VERTICAL);
+            FrameLayout avatar = outlinedAvatar();
+            showProfilePhoto(avatar, wallProfileKey(), "♙", 14, ink());
+            LinearLayout.LayoutParams avatarParams = new LinearLayout.LayoutParams(dp(34.0f), dp(34.0f));
+            avatarParams.setMarginEnd(dp(10.0f));
+            head.addView(avatar, avatarParams);
+            LinearLayout who = column();
+            who.addView(text(onlineAccount() ? "@" + user() : "Вы", 14, ink(), true));
+            who.addView(text(DateUtils.getRelativeTimeSpanString(time, System.currentTimeMillis(), DateUtils.MINUTE_IN_MILLIS).toString(), 12, muted(), false));
+            head.addView(who, new LinearLayout.LayoutParams(0, -2, 1.0f));
+            card.addView(head);
+            TextView body = text(post.optString("text"), 15, ink(), false);
+            body.setPadding(0, dp(10.0f), 0, 0);
+            card.addView(body);
+            card.setOnLongClickListener(v -> {
+                showDialog(new AlertDialog.Builder(this).setTitle("Удалить запись?").setNegativeButton("Отмена", null)
+                        .setPositiveButton("Удалить", (dialog, which) -> deleteWallPost(time)).create());
+                return true;
+            });
+        }
+    }
+
+    private void deleteWallPost(long time) {
+        org.json.JSONArray posts = wallPosts();
+        org.json.JSONArray next = new org.json.JSONArray();
+        for (int i = 0; i < posts.length(); i++) {
+            JSONObject post = posts.optJSONObject(i);
+            if (post != null && post.optLong("time") != time) {
+                next.put(post);
+            }
+        }
+        this.preferences.edit().putString(wallPostsKey(), next.toString()).apply();
+        render();
+    }
+
+    // ---- Фотоальбом: фото из галереи телефона ----
+
+    private String albumKey() {
+        return wallProfileKey() + "album";
+    }
+
+    private List<String> albumPhotos() {
+        List<String> result = new ArrayList<>();
+        try {
+            org.json.JSONArray array = new org.json.JSONArray(this.preferences.getString(albumKey(), "[]"));
+            for (int i = 0; i < array.length(); i++) {
+                result.add(array.getString(i));
+            }
+        } catch (JSONException ignored) {
+        }
+        return result;
+    }
+
+    private void saveAlbum(List<String> photos) {
+        this.preferences.edit().putString(albumKey(), new org.json.JSONArray(photos).toString()).apply();
+    }
+
+    private void pickAlbumPhotos() {
+        Intent picker = new Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("image/*").putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+        try {
+            startActivityForResult(picker, ALBUM_PICKER);
+        } catch (ActivityNotFoundException e) {
+            Toast.makeText(this, "Выбор фото недоступен", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void addAlbumPhotos(Intent data) {
+        List<Uri> picked = new ArrayList<>();
+        if (data.getClipData() != null) {
+            for (int i = 0; i < data.getClipData().getItemCount(); i++) {
+                picked.add(data.getClipData().getItemAt(i).getUri());
+            }
+        } else if (data.getData() != null) {
+            picked.add(data.getData());
+        }
+        List<String> photos = albumPhotos();
+        for (Uri uri : picked) {
+            try {
+                getContentResolver().takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            } catch (SecurityException ignored) {
+            }
+            String value = uri.toString();
+            photos.remove(value);
+            photos.add(0, value);
+        }
+        saveAlbum(photos);
+        if (this.page == 6) {
+            render();
+        }
+    }
+
+    private void showAlbum() {
+        LinearLayout card = newCard();
+        LinearLayout top = new LinearLayout(this);
+        top.setGravity(Gravity.CENTER_VERTICAL);
+        final List<String> photos = albumPhotos();
+        top.addView(text(photos.isEmpty() ? "Фотоальбом" : "Фотоальбом · " + photos.size(), 16, ink(), true), new LinearLayout.LayoutParams(0, -2, 1.0f));
+        Button add = button("+ Фото", true);
+        top.addView(add, new LinearLayout.LayoutParams(-2, dp(40.0f)));
+        add.setOnClickListener(v -> pickAlbumPhotos());
+        card.addView(top);
+        if (photos.isEmpty()) {
+            TextView empty = text("Добавьте фото из галереи — они останутся в альбоме на этом телефоне.", 14, muted(), false);
+            empty.setPadding(0, dp(10.0f), 0, 0);
+            card.addView(empty);
+            return;
+        }
+        final int columns = 3;
+        final int gap = dp(4.0f);
+        int width = this.content.getWidth() > 0 ? this.content.getWidth() : getResources().getDisplayMetrics().widthPixels;
+        final int cellSize = Math.max(dp(60.0f), (width - dp(32.0f) - dp(32.0f) - gap * (columns - 1)) / columns);
+        LinearLayout row = null;
+        for (int i = 0; i < photos.size(); i++) {
+            if (i % columns == 0) {
+                row = new LinearLayout(this);
+                LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(-1, -2);
+                rowParams.topMargin = gap;
+                card.addView(row, rowParams);
+            }
+            final String photo = photos.get(i);
+            ImageView thumb = new ImageView(this);
+            thumb.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            thumb.setBackground(surface(this.dark ? 0xFF2A2C2F : 0xFFE6EAED, 10, 0));
+            thumb.setClipToOutline(true);
+            thumb.setContentDescription("Фото " + (i + 1));
+            thumb.setOnClickListener(v -> openImage(Uri.parse(photo), "Фотоальбом"));
+            thumb.setOnLongClickListener(v -> {
+                showDialog(new AlertDialog.Builder(this).setTitle("Убрать фото из альбома?").setMessage("Само фото в галерее останется.")
+                        .setNegativeButton("Отмена", null).setPositiveButton("Убрать", (dialog, which) -> {
+                            List<String> current = albumPhotos();
+                            current.remove(photo);
+                            saveAlbum(current);
+                            render();
+                        }).create());
+                return true;
+            });
+            LinearLayout.LayoutParams thumbParams = new LinearLayout.LayoutParams(0, cellSize, 1.0f);
+            if (i % columns != 0) {
+                thumbParams.setMarginStart(gap);
+            }
+            row.addView(thumb, thumbParams);
+            loadThumbnail(thumb, Uri.parse(photo), dp(140.0f));
+        }
+        if (photos.size() % columns != 0) {
+            for (int i = photos.size() % columns; i < columns; i++) {
+                LinearLayout.LayoutParams spacer = new LinearLayout.LayoutParams(0, 1, 1.0f);
+                spacer.setMarginStart(gap);
+                row.addView(new View(this), spacer);
+            }
+        }
+    }
+
+    /** Миниатюра из галереи: декодируется в фоне с уменьшением, чтобы не тормозить прокрутку. */
+    private void loadThumbnail(final ImageView target, final Uri uri, final int size) {
+        final String cacheKey = "thumb:" + uri;
+        Bitmap cached = this.photoCache.get(cacheKey);
+        if (cached != null) {
+            target.setImageBitmap(cached);
+            return;
+        }
+        this.worker.execute(() -> {
+            Bitmap bitmap = null;
+            try {
+                BitmapFactory.Options options = new BitmapFactory.Options();
+                options.inJustDecodeBounds = true;
+                try (InputStream input = getContentResolver().openInputStream(uri)) {
+                    BitmapFactory.decodeStream(input, null, options);
+                }
+                options.inJustDecodeBounds = false;
+                options.inSampleSize = 1;
+                while (Math.min(options.outWidth, options.outHeight) / (options.inSampleSize * 2) >= size) {
+                    options.inSampleSize *= 2;
+                }
+                try (InputStream input = getContentResolver().openInputStream(uri)) {
+                    bitmap = BitmapFactory.decodeStream(input, null, options);
+                }
+            } catch (IOException | SecurityException | IllegalArgumentException ignored) {
+            }
+            final Bitmap result = bitmap;
+            this.handler.post(() -> {
+                if (result != null) {
+                    this.photoCache.put(cacheKey, result);
+                    target.setImageBitmap(result);
+                }
+            });
+        });
+    }
+
+    /** Полноэкранный просмотр фото (для альбома). */
+    private void openImage(Uri uri, String caption) {
+        android.app.Dialog viewer = new android.app.Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen);
+        FrameLayout screen = new FrameLayout(this);
+        screen.setBackgroundColor(Color.BLACK);
+        ImageView picture = new ImageView(this);
+        picture.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        screen.addView(picture, new FrameLayout.LayoutParams(-1, -1));
+        TextView title = text(caption, 14, Color.WHITE, true);
+        FrameLayout.LayoutParams titleParams = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.START);
+        titleParams.setMargins(dp(14.0f), dp(18.0f), 0, 0);
+        screen.addView(title, titleParams);
+        screen.setOnClickListener(v -> viewer.dismiss());
+        viewer.setContentView(screen);
+        viewer.show();
+        loadThumbnail(picture, uri, Math.max(getResources().getDisplayMetrics().widthPixels, dp(400.0f)));
+    }
+
+    /** Шапка профиля: фон (своё фото), аватар поверх фона, chatId и почта. */
     private LinearLayout showMyWall(LinearLayout parent) {
         final String key = wallProfileKey();
-        LinearLayout newCard = newCard(parent);
+        LinearLayout card = column();
+        card.setBackground(surface(this.dark ? 0xFF222426 : 0xFFF7F8FA, 22, surfaceOutline()));
+        card.setClipToOutline(true);
+        LinearLayout.LayoutParams cardParams = new LinearLayout.LayoutParams(-1, -2);
+        cardParams.bottomMargin = dp(12.0f);
+        parent.addView(card, cardParams);
+
+        FrameLayout cover = new FrameLayout(this);
+        Bitmap coverImage = loadImage(key, "cover");
+        if (coverImage != null) {
+            ImageView picture = new ImageView(this);
+            picture.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            picture.setImageBitmap(coverImage);
+            cover.addView(picture, new FrameLayout.LayoutParams(-1, -1));
+        } else {
+            cover.setBackground(new GradientDrawable(GradientDrawable.Orientation.TL_BR, this.dark
+                    ? new int[]{0xFF3A2F55, 0xFF1F3A4A, 0xFF2A2C2F} : new int[]{0xFFC9D6FF, 0xFFE2E2F7, 0xFFF5E6D8}));
+        }
+        TextView changeCover = text(coverImage != null ? "🖼  Сменить фон" : "🖼  Добавить фон", 12, 0xFFFFFFFF, true);
+        changeCover.setGravity(Gravity.CENTER);
+        changeCover.setPadding(dp(12.0f), 0, dp(12.0f), 0);
+        changeCover.setBackground(surface(0x66000000, 16, 0));
+        changeCover.setFocusable(true);
+        changeCover.setContentDescription("Фон профиля. Долгое нажатие убирает фон");
+        changeCover.setOnClickListener(v -> pickImage(key, "cover"));
+        if (coverImage != null) {
+            changeCover.setOnLongClickListener(v -> {
+                this.preferences.edit().remove(key + "cover").apply();
+                refreshWall();
+                return true;
+            });
+        }
+        FrameLayout.LayoutParams changeParams = new FrameLayout.LayoutParams(-2, dp(32.0f), Gravity.TOP | Gravity.END);
+        changeParams.setMargins(0, dp(10.0f), dp(10.0f), 0);
+        cover.addView(changeCover, changeParams);
+        card.addView(cover, new LinearLayout.LayoutParams(-1, dp(150.0f)));
+
         LinearLayout details = new LinearLayout(this);
-        details.setGravity(Gravity.TOP);
-        newCard.addView(details, new LinearLayout.LayoutParams(-1, -2));
+        details.setGravity(Gravity.BOTTOM);
+        details.setPadding(dp(16.0f), 0, dp(12.0f), 0);
+        LinearLayout.LayoutParams detailsParams = new LinearLayout.LayoutParams(-1, -2);
+        detailsParams.topMargin = -dp(44.0f);
+        card.addView(details, detailsParams);
         FrameLayout photo = new FrameLayout(this);
-        photo.setBackground(accentPill(18));
+        GradientDrawable ring = accentPill(46);
+        ring.setStroke(dp(3.0f), this.dark ? 0xFF222426 : 0xFFF7F8FA);
+        photo.setBackground(ring);
         photo.setClipToOutline(true);
-        showProfilePhoto(photo, key, "♙", 36, onAccent());
+        showProfilePhoto(photo, key, "♙", 34, onAccent());
         photo.setContentDescription("Выбрать фото профиля");
         photo.setFocusable(true);
         photo.setOnClickListener(v -> pickProfilePhoto(key));
-        details.addView(photo, new LinearLayout.LayoutParams(dp(96.0f), dp(116.0f)));
-        LinearLayout fields = column();
-        LinearLayout.LayoutParams fieldParams = new LinearLayout.LayoutParams(0, -2, 1.0f);
-        fieldParams.setMarginStart(dp(14.0f));
-        details.addView(fields, fieldParams);
-        addProfileField(fields, "chatId", onlineAccount() ? "@" + user() : "");
-        addProfileField(fields, "Почта", this.preferences.getString(key + "email", ""));
+        details.addView(photo, new LinearLayout.LayoutParams(dp(92.0f), dp(92.0f)));
+        details.addView(new View(this), new LinearLayout.LayoutParams(0, 1, 1.0f));
         ImageView edit = new ImageView(this);
         edit.setImageResource(R.drawable.ic_profile_edit);
         edit.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
@@ -1932,14 +2248,22 @@ public final class MainActivity extends Activity {
         edit.setTooltipText("Редактировать профиль");
         edit.setFocusable(true);
         edit.setOnClickListener(v -> editWallProfile(key));
-        LinearLayout.LayoutParams editParams = new LinearLayout.LayoutParams(dp(44.0f), dp(44.0f));
-        editParams.setMarginStart(dp(6.0f));
-        details.addView(edit, editParams);
-        return newCard;
+        details.addView(edit, new LinearLayout.LayoutParams(dp(44.0f), dp(44.0f)));
+
+        LinearLayout fields = column();
+        fields.setPadding(dp(16.0f), dp(10.0f), dp(16.0f), dp(4.0f));
+        card.addView(fields, new LinearLayout.LayoutParams(-1, -2));
+        String name = this.preferences.getString(key + "name", "");
+        if (!name.isEmpty()) {
+            fields.addView(text(name, 20, ink(), true));
+        }
+        addProfileField(fields, "chatId", onlineAccount() ? "@" + user() : "");
+        addProfileField(fields, "Почта", this.preferences.getString(key + "email", ""));
+        return card;
     }
 
     /** Декодированные аватарки: раньше каждую заново распаковывали из base64 при каждой перерисовке списка. */
-    private final android.util.LruCache<String, Bitmap> photoCache = new android.util.LruCache<String, Bitmap>(4 * 1024 * 1024) {
+    private final android.util.LruCache<String, Bitmap> photoCache = new android.util.LruCache<String, Bitmap>(12 * 1024 * 1024) {
         @Override
         protected int sizeOf(String key, Bitmap value) {
             return value.getByteCount();
@@ -1947,11 +2271,15 @@ public final class MainActivity extends Activity {
     };
 
     private Bitmap loadProfilePhoto(String key) {
-        String encoded = this.preferences.getString(key + "photo", "");
+        return loadImage(key, "photo");
+    }
+
+    private Bitmap loadImage(String key, String field) {
+        String encoded = this.preferences.getString(key + field, "");
         if (encoded.isEmpty()) {
             return null;
         }
-        String cacheKey = key + "#" + encoded.length() + ":" + encoded.hashCode();
+        String cacheKey = key + field + "#" + encoded.length() + ":" + encoded.hashCode();
         Bitmap cached = this.photoCache.get(cacheKey);
         if (cached != null) {
             return cached;
@@ -2021,9 +2349,15 @@ public final class MainActivity extends Activity {
     }
 
     private void pickProfilePhoto(String key) {
+        pickImage(key, "photo");
+    }
+
+    /** field: "photo" — аватар, "cover" — фон профиля. */
+    private void pickImage(String key, String field) {
         Intent picker = new Intent("android.intent.action.OPEN_DOCUMENT").addCategory("android.intent.category.OPENABLE").setType("image/*");
         try {
             this.photoProfileKey = key;
+            this.photoField = field;
             startActivityForResult(picker, 42);
         } catch (ActivityNotFoundException e) {
             this.photoProfileKey = null;
@@ -2032,6 +2366,11 @@ public final class MainActivity extends Activity {
     }
 
     private void saveProfilePhoto(final Uri uri, final String key) {
+        saveImage(uri, key, "photo");
+    }
+
+    private void saveImage(final Uri uri, final String key, final String field) {
+        final int maxSide = field.equals("cover") ? 1280 : 384;
         this.worker.execute(() -> {
             try {
                 BitmapFactory.Options options = new BitmapFactory.Options();
@@ -2044,7 +2383,7 @@ public final class MainActivity extends Activity {
                 }
                 options.inJustDecodeBounds = false;
                 options.inSampleSize = 1;
-                while (Math.max(options.outWidth, options.outHeight) / options.inSampleSize > 384) {
+                while (Math.max(options.outWidth, options.outHeight) / options.inSampleSize > maxSide) {
                     options.inSampleSize *= 2;
                 }
                 try (InputStream input = getContentResolver().openInputStream(uri); ByteArrayOutputStream output = new ByteArrayOutputStream()) {
@@ -2057,7 +2396,7 @@ public final class MainActivity extends Activity {
                     if (!saved) {
                         throw new IOException("Could not save photo");
                     }
-                    this.preferences.edit().putString(key + "photo", Base64.encodeToString(output.toByteArray(), Base64.NO_WRAP)).apply();
+                    this.preferences.edit().putString(key + field, Base64.encodeToString(output.toByteArray(), Base64.NO_WRAP)).apply();
                 }
                 this.handler.post(() -> {
                     if (isDestroyed()) {
@@ -3442,11 +3781,19 @@ public final class MainActivity extends Activity {
             }
             return;
         }
+        if (requestCode == ALBUM_PICKER) {
+            if (resultCode == -1 && data != null) {
+                addAlbumPhotos(data);
+            }
+            return;
+        }
         if (requestCode == 42) {
             String key2 = this.photoProfileKey;
+            String field = this.photoField;
             this.photoProfileKey = null;
+            this.photoField = "photo";
             if (resultCode == -1 && key2 != null && data != null && data.getData() != null) {
-                saveProfilePhoto(data.getData(), key2);
+                saveImage(data.getData(), key2, field);
                 return;
             }
             return;
