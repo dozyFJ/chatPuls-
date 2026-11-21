@@ -49,7 +49,7 @@ jobs:
           echo "dir=release" >> "$GITHUB_OUTPUT"
 
       - name: Собрать APK
-        run: gradle -p android --no-daemon :app:${{ steps.signing.outputs.task }}
+        run: gradle -p android --no-daemon :app:${{ steps.signing.outputs.task }} :admin:${{ steps.signing.outputs.task }}
 
       - name: Назвать APK по версии
         id: apk
@@ -57,7 +57,9 @@ jobs:
           VERSION=$(sed -n 's/.*versionName = "\(.*\)".*/\1/p' android/app/build.gradle.kts)
           CODE=$(sed -n 's/.*versionCode = \([0-9]*\).*/\1/p' android/app/build.gradle.kts)
           SRC=$(ls android/app/build/outputs/apk/${{ steps.signing.outputs.dir }}/*.apk | head -1)
-          mkdir -p out && cp "$SRC" "out/PulseMessenger-$VERSION.apk"
+          ADMIN_VERSION=$(sed -n 's/.*versionName = "\(.*\)".*/\1/p' android/admin/build.gradle.kts)
+          ADMIN_SRC=$(ls android/admin/build/outputs/apk/${{ steps.signing.outputs.dir }}/*.apk | head -1)
+          mkdir -p out && cp "$SRC" "out/PulseMessenger-$VERSION.apk" && cp "$ADMIN_SRC" "out/chatPuls-Admin-$ADMIN_VERSION.apk"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "code=$CODE" >> "$GITHUB_OUTPUT"
 

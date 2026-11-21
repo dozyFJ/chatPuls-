@@ -322,6 +322,31 @@ final class ChatStore extends SQLiteOpenHelper {
         }
     }
 
+    /** Курсор удалений, которые прислал сервер (сообщения, удалённые модератором). */
+    long removedCursor(String owner) {
+        return cursor("removed|" + owner);
+    }
+
+    void applyRemovals(String owner, List<String[]> removed, long cursor) {
+        if (removed.isEmpty()) {
+            return;
+        }
+        SQLiteDatabase db = getWritableDatabase();
+        db.beginTransaction();
+        try {
+            for (String[] item : removed) {
+                db.delete("messages", "owner = ? AND sender = ? AND id = ?", new String[]{owner, item[0], item[1]});
+            }
+            ContentValues v = new ContentValues();
+            v.put("owner", "removed|" + owner);
+            v.put("sequence", Math.max(cursor, removedCursor(owner)));
+            db.insertWithOnConflict("cursors", null, v, SQLiteDatabase.CONFLICT_REPLACE);
+            db.setTransactionSuccessful();
+        } finally {
+            db.endTransaction();
+        }
+    }
+
     // ---- Вспомогательное ----
 
     private static Message fromCursor(Cursor c) {

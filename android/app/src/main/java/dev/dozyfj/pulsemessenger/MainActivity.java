@@ -2459,11 +2459,14 @@ public final class MainActivity extends Activity {
         final String currentOwner = owner();
         final boolean archived = this.store.isArchived(currentOwner, name);
         final boolean blocked = this.store.isBlocked(currentOwner, name);
-        String[] actions = new String[4];
+        String[] actions = new String[onlineAccount() ? 5 : 4];
         actions[0] = archived ? "Вернуть из архива" : "В архив";
         actions[1] = "Выбрать фото аватара";
         actions[2] = "Удалить";
         actions[3] = blocked ? "Разблокировать" : "Заблокировать";
+        if (actions.length > 4) {
+            actions[4] = "Пожаловаться";
+        }
         showDialog(new AlertDialog.Builder(this).setTitle(name).setItems(actions, (dialog, which) -> {
             switch (which) {
                 case 0:
@@ -2480,6 +2483,9 @@ public final class MainActivity extends Activity {
                     this.store.setBlocked(currentOwner, name, !blocked);
                     Toast.makeText(this, blocked ? "Контакт разблокирован" : "Контакт заблокирован на этом устройстве", Toast.LENGTH_SHORT).show();
                     refreshChats();
+                    break;
+                case 4:
+                    reportAbuse(name, null);
                     break;
             }
 
@@ -2784,6 +2790,13 @@ public final class MainActivity extends Activity {
                 bubble.setClickable(true);
                 bubble.setFocusable(true);
                 bubble.setOnClickListener(v -> messageActions(message));
+            }
+            if (!mine && message.status() == ChatStore.DELIVERED && onlineAccount()) {
+                bubble.setLongClickable(true);
+                bubble.setOnLongClickListener(v -> {
+                    reportAbuse(message.from(), message.id());
+                    return true;
+                });
             }
             LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-2, -2);
             params.gravity = mine ? Gravity.END : Gravity.START;
@@ -3203,7 +3216,64 @@ public final class MainActivity extends Activity {
             }
 
         });
+        Button adminKey = button("Ключ администратора", false);
+        card.addView(adminKey, new LinearLayout.LayoutParams(-1, -2));
+        adminKey.setOnClickListener(v -> showAdminKey());
         refreshHostControls();
+    }
+
+    private static final String[] REPORT_REASONS = {"Спам", "Оскорбления", "Мошенничество", "Неприемлемый контент", "Другое"};
+
+    /** Жалоба модератору сервера: на пользователя или на конкретное сообщение. */
+    private void reportAbuse(final String target, final String messageId) {
+        final String base = this.preferences.getString("server", "");
+        final String token = this.preferences.getString("token", "");
+        showDialog(new AlertDialog.Builder(this).setTitle(messageId == null ? "Пожаловаться на " + target : "Пожаловаться на сообщение")
+                .setItems(REPORT_REASONS, (dialog, which) -> this.worker.execute(() -> {
+                    String result;
+                    try {
+                        new PulseApi(base, token).report(target, messageId, REPORT_REASONS[which]);
+                        result = "Жалоба отправлена модератору";
+                    } catch (PulseApi.ApiError e) {
+                        result = e.code == 429 ? "Слишком много жалоб, подождите" : e.code == 404 ? "Сообщение уже удалено" : "Не удалось отправить жалобу";
+                    } catch (Exception e) {
+                        result = "Нет соединения с сервером";
+                    }
+                    final String message = result;
+                    this.handler.post(() -> {
+                        if (!isDestroyed()) {
+                            Toast.makeText(this, message, Toast.LENGTH_SHORT).show();
+                        }
+                    });
+                })).setNegativeButton("Отмена", null).create());
+    }
+
+    /** Ключ для приложения chatPuls Admin: адрес сервера + секретный ключ. */
+    private void showAdminKey() {
+        List<String> addresses = this.phoneHost.lanUrls();
+        String address = addresses.isEmpty() ? this.phoneHost.localUrl() : addresses.get(0);
+        final String key = PhoneServerStore.adminToken(this);
+        final String share = "chatPuls Admin\n" + address + "\n" + key;
+        TextView details = text("Откройте chatPuls Admin на телефоне модератора и вставьте эти данные. С ключом можно банить пользователей и удалять сообщения, поэтому не отправляйте его посторонним.\n\n"
+                + (address.isEmpty() ? "Запустите сервер, чтобы появился адрес." : address) + "\n\n" + key, 13, ink(), false);
+        details.setTextIsSelectable(true);
+        details.setPadding(dp(22.0f), dp(8.0f), dp(22.0f), 0);
+        showDialog(new AlertDialog.Builder(this).setTitle("Ключ администратора").setView(details)
+                .setPositiveButton("Поделиться", (dialog, which) -> {
+                    try {
+                        startActivity(Intent.createChooser(new Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, share), "Ключ chatPuls Admin"));
+                    } catch (ActivityNotFoundException e) {
+                        Toast.makeText(this, "Скопируйте ключ из окна", Toast.LENGTH_LONG).show();
+                    }
+                })
+                .setNeutralButton("Новый ключ", (dialog, which) -> showDialog(new AlertDialog.Builder(this).setTitle("Сменить ключ?")
+                        .setMessage("Старый ключ перестанет работать во всех копиях chatPuls Admin.")
+                        .setNegativeButton("Отмена", null)
+                        .setPositiveButton("Сменить", (d, w) -> {
+                            PhoneServerStore.rotateAdminToken(this);
+                            showAdminKey();
+                        }).create()))
+                .setNegativeButton("Закрыть", null).create());
     }
 
     private void shareHost(String address) {
@@ -3684,18 +3754,26 @@ public final class MainActivity extends Activity {
                 }
                 for (int batch = 0; batch < 20; batch++) {
                     long before = this.store.cursor(currentOwner);
-                    List<ChatStore.Message> incoming = api.fetch(before);
-                    if (incoming.isEmpty()) {
-                        break;
+                    long removedBefore = this.store.removedCursor(currentOwner);
+                    PulseApi.Batch incoming = api.fetch(before, removedBefore);
+                    if (!incoming.removed().isEmpty()) {
+                        this.store.applyRemovals(currentOwner, incoming.removed(), incoming.removedCursor());
+                        changed = true;
                     }
-                    this.store.received(currentOwner, currentUser, incoming);
+                    if (incoming.messages().isEmpty()) {
+                        if (incoming.removed().isEmpty()) {
+                            break;
+                        }
+                        continue;
+                    }
+                    this.store.received(currentOwner, currentUser, incoming.messages());
                     changed = true;
                     if (this.store.cursor(currentOwner) <= before) {
                         break;
                     }
                 }
             } catch (PulseApi.ApiError e) {
-                result = e.code == 401 ? "Войдите снова" : "Нет соединения с сервером";
+                result = e.code == 401 ? "Войдите снова" : e.code == 403 ? "Аккаунт заблокирован модератором" : "Нет соединения с сервером";
             } catch (Exception e) {
                 result = "Нет соединения с сервером";
             } finally {

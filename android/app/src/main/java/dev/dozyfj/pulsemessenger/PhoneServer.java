@@ -155,11 +155,22 @@ final class PhoneServer implements AutoCloseable {
                     throw new PhoneServerStore.Failure(413);
                 }
                 boolean auth = request[0].equals("POST") && (path.equals("/v1/register") || path.equals("/v1/login"));
+                boolean admin = path.startsWith("/v1/admin/");
                 if (auth && !allowed(socket.getInetAddress().getHostAddress())) {
                     throw new PhoneServerStore.Failure(429);
                 }
+                if (admin) {
+                    try {
+                        this.store.requireAdmin(headers.get("x-pulse-admin"));
+                    } catch (PhoneServerStore.Failure failure) {
+                        if (!allowed("admin:" + socket.getInetAddress().getHostAddress())) {
+                            throw new PhoneServerStore.Failure(429);
+                        }
+                        throw failure;
+                    }
+                }
                 String user = null;
-                if (!(request[0].equals("GET") && path.equals("/health")) && !auth) {
+                if (!(request[0].equals("GET") && path.equals("/health")) && !auth && !admin) {
                     user = this.store.user(headers.get("authorization"));
                 }
                 JSONObject payload = null;
@@ -180,7 +191,10 @@ final class PhoneServer implements AutoCloseable {
                     }
                 }
                 JSONObject result;
-                if (request[0].equals("GET") && path.equals("/health")) {
+                String query = uri.getRawQuery();
+                if (admin) {
+                    result = adminRequest(request[0], path, query, payload);
+                } else if (request[0].equals("GET") && path.equals("/health")) {
                     result = new JSONObject().put("ok", true);
                 } else if (auth) {
                     result = this.store.authenticate(payload, path.equals("/v1/register"));
@@ -190,12 +204,14 @@ final class PhoneServer implements AutoCloseable {
                     result = this.calls.change(user, payload, this.store);
                 } else if (request[0].equals("POST") && (path.equals("/v1/messages") || voice)) {
                     result = this.store.send(user, payload, voice);
+                } else if (request[0].equals("POST") && path.equals("/v1/reports")) {
+                    result = this.store.report(user, payload);
                 } else if (request[0].equals("GET") && path.equals("/v1/messages")) {
-                    String query = uri.getRawQuery();
-                    if (query != null && !query.matches("after=[0-9]{1,15}")) {
+                    java.util.regex.Matcher cursors = java.util.regex.Pattern.compile("after=([0-9]{1,15})(?:&removed=([0-9]{1,15}))?").matcher(query == null ? "after=0" : query);
+                    if (!cursors.matches()) {
                         throw new PhoneServerStore.Failure(400);
                     }
-                    result = this.store.fetch(user, query == null ? "0" : query.substring(6));
+                    result = this.store.fetch(user, cursors.group(1), cursors.group(2) == null ? "0" : cursors.group(2));
                 } else {
                     throw new PhoneServerStore.Failure(404);
                 }
@@ -211,6 +227,34 @@ final class PhoneServer implements AutoCloseable {
         } finally {
             this.sockets.remove(socket);
         }
+    }
+
+    private JSONObject adminRequest(String method, String path, String query, JSONObject payload) throws Exception {
+        Map<String, String> params = new HashMap<>();
+        if (query != null) {
+            for (String pair : query.split("&")) {
+                int equals = pair.indexOf('=');
+                if (equals > 0) {
+                    params.put(pair.substring(0, equals), java.net.URLDecoder.decode(pair.substring(equals + 1), "UTF-8"));
+                }
+            }
+        }
+        if (method.equals("GET") && path.equals("/v1/admin/stats")) {
+            return this.store.adminStats();
+        }
+        if (method.equals("GET") && path.equals("/v1/admin/users")) {
+            return this.store.adminUsers(params.getOrDefault("q", ""));
+        }
+        if (method.equals("POST") && path.equals("/v1/admin/users")) {
+            return this.store.adminUserAction(payload);
+        }
+        if (method.equals("GET") && path.equals("/v1/admin/reports")) {
+            return this.store.adminReports("all".equals(params.get("status")));
+        }
+        if (method.equals("POST") && path.equals("/v1/admin/reports")) {
+            return this.store.adminReportAction(payload);
+        }
+        throw new PhoneServerStore.Failure(404);
     }
 
     private static void reply(Socket socket, int status, String json) throws IOException {

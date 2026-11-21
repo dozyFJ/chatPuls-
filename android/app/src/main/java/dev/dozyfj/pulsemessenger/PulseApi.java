@@ -154,12 +154,32 @@ final class PulseApi {
         return message.audio().isEmpty() ? parseMessage(request("/v1/messages", body)) : parseMessage(request("/v1/voice", body.put("audio", message.audio())));
     }
 
-    List<ChatStore.Message> fetch(long after) throws Exception {
-        JSONArray array = request("/v1/messages?after=" + after, null).getJSONArray("messages");
-        List<ChatStore.Message> result = new ArrayList<>();
+    /** Пачка синхронизации: новые сообщения и удалённые модератором (from, id). */
+    record Batch(List<ChatStore.Message> messages, List<String[]> removed, long removedCursor) {}
+
+    Batch fetch(long after, long removedAfter) throws Exception {
+        JSONObject response = request("/v1/messages?after=" + after + "&removed=" + removedAfter, null);
+        JSONArray array = response.getJSONArray("messages");
+        List<ChatStore.Message> messages = new ArrayList<>();
         for (int i = 0; i < array.length(); i++) {
-            result.add(parseMessage(array.getJSONObject(i)));
+            messages.add(parseMessage(array.getJSONObject(i)));
         }
-        return result;
+        List<String[]> removed = new ArrayList<>();
+        long cursor = removedAfter;
+        JSONArray gone = response.optJSONArray("removed");
+        for (int i = 0; gone != null && i < gone.length(); i++) {
+            JSONObject item = gone.getJSONObject(i);
+            removed.add(new String[]{item.getString("from"), item.getString("id")});
+            cursor = Math.max(cursor, item.getLong("rseq"));
+        }
+        return new Batch(messages, removed, cursor);
+    }
+
+    void report(String target, String messageId, String reason) throws Exception {
+        JSONObject body = new JSONObject().put("to", target).put("reason", reason);
+        if (messageId != null) {
+            body.put("id", messageId);
+        }
+        request("/v1/reports", body);
     }
 }

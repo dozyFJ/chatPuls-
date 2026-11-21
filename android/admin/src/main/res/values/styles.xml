@@ -1,0 +1,9 @@
+<resources>
+    <style name="AdminTheme" parent="@android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:colorAccent">#C2410C</item>
+        <item name="android:statusBarColor">#F4F5F7</item>
+        <item name="android:navigationBarColor">#F4F5F7</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowBackground">@color/admin_background</item>
+    </style>
+</resources>

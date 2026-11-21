@@ -16,9 +16,13 @@ import org.json.JSONObject;
 
 final class PhoneServerStore extends SQLiteOpenHelper {
     private static final SecureRandom RANDOM = new SecureRandom();
+    private static final long DAY = 24L * 60 * 60 * 1000;
+    private static final String HOST_PREFERENCES = "pulse-host";
+    private final Context context;
 
     PhoneServerStore(Context context) {
-        super(context.getApplicationContext(), "pulse-host.db", (SQLiteDatabase.CursorFactory) null, 2);
+        super(context.getApplicationContext(), "pulse-host.db", null, 3);
+        this.context = context.getApplicationContext();
     }
 
     @Override
@@ -28,12 +32,22 @@ final class PhoneServerStore extends SQLiteOpenHelper {
         db.execSQL("CREATE TABLE messages (sequence INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL, sender TEXT NOT NULL, recipient TEXT NOT NULL, body TEXT NOT NULL, created INTEGER NOT NULL, audio TEXT NOT NULL DEFAULT '', UNIQUE(sender,id))");
         db.execSQL("CREATE INDEX messages_sender ON messages(sender,sequence)");
         db.execSQL("CREATE INDEX messages_recipient ON messages(recipient,sequence)");
+        createModerationTables(db);
+    }
+
+    private static void createModerationTables(SQLiteDatabase db) {
+        db.execSQL("CREATE TABLE banned (name TEXT PRIMARY KEY, created INTEGER NOT NULL)");
+        db.execSQL("CREATE TABLE reports (id INTEGER PRIMARY KEY AUTOINCREMENT, reporter TEXT NOT NULL, target TEXT NOT NULL, message_id TEXT, message_text TEXT NOT NULL DEFAULT '', reason TEXT NOT NULL, created INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'open', resolved INTEGER)");
+        db.execSQL("CREATE TABLE removed (rseq INTEGER PRIMARY KEY AUTOINCREMENT, sender TEXT NOT NULL, id TEXT NOT NULL, recipient TEXT NOT NULL, created INTEGER NOT NULL)");
     }
 
     @Override
     public void onUpgrade(SQLiteDatabase db, int oldVersion, int newVersion) {
         if (oldVersion < 2) {
             db.execSQL("ALTER TABLE messages ADD COLUMN audio TEXT NOT NULL DEFAULT ''");
+        }
+        if (oldVersion < 3) {
+            createModerationTables(db);
         }
     }
 
@@ -96,6 +110,9 @@ final class PhoneServerStore extends SQLiteOpenHelper {
                 expected = c.getString(1);
             }
         }
+        if (!register && isBanned(db, name)) {
+            throw new Failure(403);
+        }
         ContentValues newUser = null;
         if (register) {
             if (salt != null) {
@@ -139,7 +156,11 @@ final class PhoneServerStore extends SQLiteOpenHelper {
         }
         try (Cursor c = getReadableDatabase().rawQuery("SELECT username FROM sessions WHERE hash = ? AND expires > ?", new String[]{hash(authorization.substring(7)), Long.toString(System.currentTimeMillis())})) {
             if (c.moveToFirst()) {
-                return c.getString(0);
+                String name = c.getString(0);
+                if (isBanned(getReadableDatabase(), name)) {
+                    throw new Failure(403);
+                }
+                return name;
             }
         }
         throw new Failure(401);
@@ -160,8 +181,12 @@ final class PhoneServerStore extends SQLiteOpenHelper {
     }
 
     synchronized JSONObject fetch(String user, String after) throws Exception {
+        return fetch(user, after, "0");
+    }
+
+    synchronized JSONObject fetch(String user, String after, String removedAfter) throws Exception {
         JSONArray messages;
-        if (!after.matches("[0-9]{1,15}")) {
+        if (!after.matches("[0-9]{1,15}") || !removedAfter.matches("[0-9]{1,15}")) {
             throw new Failure(400);
         }
         messages = new JSONArray();
@@ -176,7 +201,13 @@ final class PhoneServerStore extends SQLiteOpenHelper {
                 messages.put(item);
             }
         }
-        return new JSONObject().put("messages", messages);
+        JSONArray removed = new JSONArray();
+        try (Cursor c = getReadableDatabase().rawQuery("SELECT rseq,sender,id FROM removed WHERE rseq > ? AND (sender = ? OR recipient = ?) ORDER BY rseq LIMIT 200", new String[]{removedAfter, user, user})) {
+            while (c.moveToNext()) {
+                removed.put(new JSONObject().put("rseq", c.getLong(0)).put("from", c.getString(1)).put("id", c.getString(2)));
+            }
+        }
+        return new JSONObject().put("messages", messages).put("removed", removed);
     }
 
     synchronized JSONObject send(String user, JSONObject input, boolean voice) throws Exception {
@@ -198,7 +229,7 @@ final class PhoneServerStore extends SQLiteOpenHelper {
         }
         SQLiteDatabase db = getWritableDatabase();
         try (Cursor c = db.rawQuery("SELECT name FROM users WHERE name = ?", new String[]{to})) {
-            if (!c.moveToFirst()) {
+            if (!c.moveToFirst() || isBanned(db, to)) {
                 throw new Failure(404);
             }
         }
@@ -224,5 +255,203 @@ final class PhoneServerStore extends SQLiteOpenHelper {
             item.put("audio", audio);
         }
         return item;
+    }
+
+    // ---- Модерация ----
+
+    private static boolean isBanned(SQLiteDatabase db, String name) {
+        try (Cursor c = db.rawQuery("SELECT 1 FROM banned WHERE name = ?", new String[]{name})) {
+            return c.moveToFirst();
+        }
+    }
+
+    /** Ключ для приложения chatPuls Admin. Хранится в закрытых настройках приложения, создаётся при первом запросе. */
+    static synchronized String adminToken(Context context) {
+        android.content.SharedPreferences preferences = context.getSharedPreferences(HOST_PREFERENCES, Context.MODE_PRIVATE);
+        String token = preferences.getString("adminToken", "");
+        if (!token.matches("[a-f0-9]{64}")) {
+            token = random(32);
+            preferences.edit().putString("adminToken", token).apply();
+        }
+        return token;
+    }
+
+    static synchronized String rotateAdminToken(Context context) {
+        String token = random(32);
+        context.getSharedPreferences(HOST_PREFERENCES, Context.MODE_PRIVATE).edit().putString("adminToken", token).apply();
+        return token;
+    }
+
+    void requireAdmin(String header) throws Exception {
+        if (header == null || !header.matches("[a-f0-9]{64}")) {
+            throw new Failure(401);
+        }
+        byte[] expected = hash(adminToken(this.context)).getBytes(StandardCharsets.US_ASCII);
+        if (!MessageDigest.isEqual(expected, hash(header).getBytes(StandardCharsets.US_ASCII))) {
+            throw new Failure(401);
+        }
+    }
+
+    synchronized JSONObject report(String user, JSONObject input) throws Exception {
+        String target = input.optString("to", "").trim().toLowerCase(Locale.ROOT);
+        Object rawReason = input.opt("reason");
+        String reason = rawReason instanceof String ? ((String) rawReason).trim() : "";
+        Object rawId = input.opt("id");
+        String messageId = rawId instanceof String ? (String) rawId : null;
+        if (rawId != null && rawId != JSONObject.NULL && messageId == null) {
+            throw new Failure(400);
+        }
+        if (!userExists(target) || target.equals(user) || reason.isEmpty() || reason.length() > 300 || (messageId != null && !messageId.matches("[a-f0-9-]{36}"))) {
+            throw new Failure(400);
+        }
+        SQLiteDatabase db = getWritableDatabase();
+        try (Cursor c = db.rawQuery("SELECT COUNT(*) FROM reports WHERE reporter = ? AND status = 'open'", new String[]{user})) {
+            if (c.moveToFirst() && c.getInt(0) >= 50) {
+                throw new Failure(429);
+            }
+        }
+        String text = "";
+        if (messageId != null) {
+            try (Cursor c = db.rawQuery("SELECT body FROM messages WHERE sender = ? AND recipient = ? AND id = ?", new String[]{target, user, messageId})) {
+                if (!c.moveToFirst()) {
+                    throw new Failure(404);
+                }
+                text = c.getString(0);
+            }
+        }
+        ContentValues values = new ContentValues();
+        values.put("reporter", user);
+        values.put("target", target);
+        values.put("message_id", messageId);
+        values.put("message_text", text);
+        values.put("reason", reason);
+        values.put("created", System.currentTimeMillis());
+        db.insertOrThrow("reports", null, values);
+        return new JSONObject().put("ok", true);
+    }
+
+    private static long count(SQLiteDatabase db, String sql, String... args) {
+        try (Cursor c = db.rawQuery(sql, args)) {
+            return c.moveToFirst() ? c.getLong(0) : 0;
+        }
+    }
+
+    synchronized JSONObject adminStats() throws Exception {
+        SQLiteDatabase db = getReadableDatabase();
+        long now = System.currentTimeMillis();
+        String since = Long.toString(now - DAY);
+        return new JSONObject()
+                .put("users", count(db, "SELECT COUNT(*) FROM users"))
+                .put("banned", count(db, "SELECT COUNT(*) FROM banned"))
+                .put("sessions", count(db, "SELECT COUNT(*) FROM sessions WHERE expires > ?", Long.toString(now)))
+                .put("messages", count(db, "SELECT COUNT(*) FROM messages"))
+                .put("messagesToday", count(db, "SELECT COUNT(*) FROM messages WHERE created > ?", since))
+                .put("activeToday", count(db, "SELECT COUNT(DISTINCT sender) FROM messages WHERE created > ?", since))
+                .put("openReports", count(db, "SELECT COUNT(*) FROM reports WHERE status = 'open'"));
+    }
+
+    synchronized JSONObject adminUsers(String query) throws Exception {
+        String pattern = "%" + query.trim().toLowerCase(Locale.ROOT).replace("\\", "").replace("%", "").replace("_", "\\_") + "%";
+        JSONArray users = new JSONArray();
+        try (Cursor c = getReadableDatabase().rawQuery("SELECT u.name, EXISTS(SELECT 1 FROM banned b WHERE b.name = u.name), (SELECT COUNT(*) FROM messages m WHERE m.sender = u.name), COALESCE((SELECT MAX(created) FROM messages m WHERE m.sender = u.name), 0) AS last FROM users u WHERE u.name LIKE ? ESCAPE '\\' ORDER BY last DESC, u.name LIMIT 200", new String[]{pattern})) {
+            while (c.moveToNext()) {
+                users.put(new JSONObject().put("name", c.getString(0)).put("banned", c.getInt(1) != 0).put("messages", c.getLong(2)).put("lastActive", c.getLong(3)));
+            }
+        }
+        return new JSONObject().put("users", users);
+    }
+
+    synchronized JSONObject adminUserAction(JSONObject input) throws Exception {
+        String name = input.optString("name", "").trim().toLowerCase(Locale.ROOT);
+        String action = input.optString("action", "");
+        if (!userExists(name) || !(action.equals("ban") || action.equals("unban") || action.equals("logout"))) {
+            throw new Failure(400);
+        }
+        SQLiteDatabase db = getWritableDatabase();
+        if (action.equals("unban")) {
+            db.delete("banned", "name = ?", new String[]{name});
+        } else {
+            db.beginTransaction();
+            try {
+                if (action.equals("ban")) {
+                    ban(db, name);
+                } else {
+                    db.delete("sessions", "username = ?", new String[]{name});
+                }
+                db.setTransactionSuccessful();
+            } finally {
+                db.endTransaction();
+            }
+        }
+        return new JSONObject().put("ok", true);
+    }
+
+    private static void ban(SQLiteDatabase db, String name) {
+        ContentValues values = new ContentValues();
+        values.put("name", name);
+        values.put("created", System.currentTimeMillis());
+        db.insertWithOnConflict("banned", null, values, SQLiteDatabase.CONFLICT_IGNORE);
+        db.delete("sessions", "username = ?", new String[]{name});
+    }
+
+    synchronized JSONObject adminReports(boolean all) throws Exception {
+        JSONArray reports = new JSONArray();
+        try (Cursor c = getReadableDatabase().rawQuery("SELECT id,reporter,target,message_id,message_text,reason,created,status FROM reports" + (all ? "" : " WHERE status = 'open'") + " ORDER BY id DESC LIMIT 200", null)) {
+            while (c.moveToNext()) {
+                reports.put(new JSONObject().put("id", c.getLong(0)).put("reporter", c.getString(1)).put("target", c.getString(2))
+                        .put("messageId", c.isNull(3) ? JSONObject.NULL : c.getString(3)).put("text", c.getString(4)).put("reason", c.getString(5))
+                        .put("time", c.getLong(6)).put("status", c.getString(7)));
+            }
+        }
+        return new JSONObject().put("reports", reports);
+    }
+
+    synchronized JSONObject adminReportAction(JSONObject input) throws Exception {
+        long id = input.optLong("id", -1);
+        String action = input.optString("action", "");
+        if (!(action.equals("dismiss") || action.equals("delete") || action.equals("ban") || action.equals("delete_ban"))) {
+            throw new Failure(400);
+        }
+        SQLiteDatabase db = getWritableDatabase();
+        String target;
+        String messageId;
+        try (Cursor c = db.rawQuery("SELECT target, message_id FROM reports WHERE id = ?", new String[]{Long.toString(id)})) {
+            if (!c.moveToFirst()) {
+                throw new Failure(404);
+            }
+            target = c.getString(0);
+            messageId = c.isNull(1) ? null : c.getString(1);
+        }
+        db.beginTransaction();
+        try {
+            if ((action.equals("delete") || action.equals("delete_ban")) && messageId != null) {
+                String recipient = null;
+                try (Cursor c = db.rawQuery("SELECT recipient FROM messages WHERE sender = ? AND id = ?", new String[]{target, messageId})) {
+                    if (c.moveToFirst()) {
+                        recipient = c.getString(0);
+                    }
+                }
+                if (recipient != null) {
+                    db.delete("messages", "sender = ? AND id = ?", new String[]{target, messageId});
+                    ContentValues removed = new ContentValues();
+                    removed.put("sender", target);
+                    removed.put("id", messageId);
+                    removed.put("recipient", recipient);
+                    removed.put("created", System.currentTimeMillis());
+                    db.insertOrThrow("removed", null, removed);
+                }
+            }
+            if (action.equals("ban") || action.equals("delete_ban")) {
+                ban(db, target);
+            }
+            ContentValues status = new ContentValues();
+            status.put("status", action.equals("dismiss") ? "dismissed" : "resolved");
+            status.put("resolved", System.currentTimeMillis());
+            db.update("reports", status, "id = ?", new String[]{Long.toString(id)});
+            db.setTransactionSuccessful();
+        } finally {
+            db.endTransaction();
+        }
+        return new JSONObject().put("ok", true);
     }
 }
