@@ -108,7 +108,6 @@ public final class MainActivity extends Activity {
     private static final int FEED = 6;
     private static final int FEED_CHAT_OFFSET = 1;
     private static final int FEED_TAB = 5;
-    private static final int GROUPS_TAB = 1;
     private static final int INSTALL_PERMISSION = 41;
     private static final int LEGACY_FEED_OR_NEWS = 3;
     private static final int MESSAGES_TAB = 0;
@@ -204,10 +203,11 @@ public final class MainActivity extends Activity {
     private boolean waitingForRefresh;
     private boolean watchDrawerSwipe;
     private boolean watchTabSwipe;
-    private static final int[] ALL_CHATS_ORDER = {5, 0, 1, 2, 3, 4, 6};
+    private static final int[] ALL_CHATS_ORDER = {5, 0, 2, 3, 4, 6};
     private static final String[] ALL_CHATS_LABELS = {"Чаты", "Группы", "Каналы", "Сообщества", "Контакты", "Фид", "Звонки"};
-    private static final String[] FEED_SECTIONS = {"Мой профиль", "Чаты", "Группы", "Каналы", "Сообщества", "Контакты", "Звонки"};
-    private static final int[] FEED_SECTION_ICONS = {R.drawable.ic_feed_profile, R.drawable.ic_pulse_mark, R.drawable.ic_feed_groups, R.drawable.ic_feed_channels, R.drawable.ic_community_rail, R.drawable.ic_feed_profile, R.drawable.ic_audio_call};
+    private static final String[] FEED_SECTIONS = {"Мой профиль", "Чаты", "Каналы", "Сообщества", "Контакты", "Звонки"};
+    private static final int[] FEED_SECTION_TABS = {-1, 0, 2, 3, 4, 6};
+    private static final int[] FEED_SECTION_ICONS = {R.drawable.ic_feed_profile, R.drawable.ic_pulse_mark, R.drawable.ic_feed_channels, R.drawable.ic_community_rail, R.drawable.ic_feed_profile, R.drawable.ic_audio_call};
     private static final String[] PROFILE_SECTIONS = {"Стена", "Фотоальбомы", "Реки"};
     private static final String[] PROFILE_SECTION_EMPTY = {"Публикаций пока нет.", "Фотоальбомов пока нет.", "Рекомендаций пока нет."};
     private static final String[] SETTINGS_TABS = {"Приложение", "Аккаунт", "Сервер"};
@@ -317,7 +317,7 @@ public final class MainActivity extends Activity {
             if (this.page == 0 && this.allChatsTab == 3 && this.chatFilter == 0) {
                 this.page = 4;
             }
-            if (this.allChatsTab < 0 || this.allChatsTab >= 3) {
+            if (this.allChatsTab < 0 || this.allChatsTab >= 3 || this.allChatsTab == 1) {
                 this.allChatsTab = 0;
             }
             this.clipRecommendations = bundle.getBoolean("clipRecommendations");
@@ -1070,11 +1070,7 @@ public final class MainActivity extends Activity {
         } else if (this.page == 7) {
             showCallHistory();
         } else if (showEmptySection) {
-            if (this.allChatsTab == 1) {
-                showSectionWithArchive("К группам", "Групп пока нет.", "В архиве пока нет групп.");
-            } else {
-                showSectionWithArchive("К каналам", "Каналов пока нет.", "В архиве пока нет каналов.");
-            }
+            showSectionWithArchive("К каналам", "Каналов пока нет.", "В архиве пока нет каналов.");
         } else {
             showChats();
         }
@@ -1162,7 +1158,7 @@ public final class MainActivity extends Activity {
 
     private void selectAllChatsTab(int tab) {
         int i;
-        if (tab < 0 || tab >= ALL_CHATS_LABELS.length) {
+        if (tab < 0 || tab >= ALL_CHATS_LABELS.length || tab == 1) {
             return;
         }
         if (isMainSectionOpen() && tab == activeChatsTab()) {
@@ -1679,7 +1675,12 @@ public final class MainActivity extends Activity {
             return 0;
         }
         int tab = activeChatsTab();
-        return (tab == 6 ? 5 : tab) + 1;
+        for (int i = 1; i < FEED_SECTION_TABS.length; i++) {
+            if (FEED_SECTION_TABS[i] == tab) {
+                return i;
+            }
+        }
+        return 1;
     }
 
     private void selectFeedSection(int index) {
@@ -1687,8 +1688,7 @@ public final class MainActivity extends Activity {
             return;
         }
         if (index >= 1) {
-            int tab = index - 1;
-            selectAllChatsTab(tab <= 4 ? tab : 6);
+            selectAllChatsTab(FEED_SECTION_TABS[index]);
         } else if (this.page != 6 || this.feedSection != index) {
             this.feedSection = index;
             if (this.page != 6) {
