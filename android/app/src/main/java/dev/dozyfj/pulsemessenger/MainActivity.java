@@ -1935,11 +1935,12 @@ public final class MainActivity extends Activity {
         if (this.feedSection < 0 || this.feedSection >= PROFILE_SECTIONS.length) {
             this.feedSection = PROFILE_FEED;
         }
-        LinearLayout banner = showMyWall(this.content);
+        // Вкладки над шапкой профиля.
         LinearLayout sections = new LinearLayout(this);
         LinearLayout.LayoutParams row = new LinearLayout.LayoutParams(-1, -2);
-        row.setMargins(dp(16.0f), dp(12.0f), dp(16.0f), dp(16.0f));
-        banner.addView(sections, row);
+        row.bottomMargin = dp(10.0f);
+        this.content.addView(sections, row);
+        showMyWall(this.content);
         for (int i = 0; i < PROFILE_SECTIONS.length; i++) {
             final int section = i;
             boolean selected = this.feedSection == section;
@@ -2646,7 +2647,7 @@ public final class MainActivity extends Activity {
         details.addView(edit, new LinearLayout.LayoutParams(dp(44.0f), dp(44.0f)));
 
         LinearLayout fields = column();
-        fields.setPadding(dp(16.0f), dp(10.0f), dp(16.0f), dp(4.0f));
+        fields.setPadding(dp(16.0f), dp(10.0f), dp(16.0f), dp(14.0f));
         card.addView(fields, new LinearLayout.LayoutParams(-1, -2));
         String name = this.preferences.getString(key + "name", "");
         if (!name.isEmpty()) {
