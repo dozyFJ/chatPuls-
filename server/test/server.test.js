@@ -136,3 +136,41 @@ test('first start creates an admin key once', async () => {
     assert.ok(!(await readFile(file, 'utf8')).includes(first.createdAdminToken));
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
+
+test('roles: superadmin appoints admins, admins cannot touch admins', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'pulse-roles-'));
+  const key = 'c'.repeat(64);
+  const server = await createServer({ file: join(directory, 'data.json'), adminToken: key });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const call = async (route, { token, admin, data } = {}) => {
+    const headers = { ...(token && { Authorization: `Bearer ${token}` }), ...(admin && { 'X-Pulse-Admin': admin }), ...(data && { 'Content-Type': 'application/json' }) };
+    const response = await fetch(base + route, { method: data ? 'POST' : 'GET', headers, ...(data && { body: JSON.stringify(data) }) });
+    return { status: response.status, body: await response.json() };
+  };
+  try {
+    const register = async username => (await call('/v1/register', { data: { username, password: 'password-123' } })).body.token;
+    const boss = await register('dzfx');
+    const mod = await register('mod');
+    const user = await register('user');
+    const other = await register('other');
+    assert.equal((await call('/v1/admin/me', { token: boss })).status, 401);
+    assert.equal((await call('/v1/admin/roles', { admin: key, data: { name: 'dzfx', role: 'superadmin' } })).status, 200);
+    assert.deepEqual((await call('/v1/admin/me', { token: boss })).body, { name: 'dzfx', role: 'superadmin' });
+    assert.equal((await call('/v1/admin/roles', { token: boss, data: { name: 'mod', role: 'admin' } })).status, 200);
+    assert.equal((await call('/v1/admin/roles', { token: boss, data: { name: 'other', role: 'superadmin' } })).status, 403);
+    assert.equal((await call('/v1/admin/roles', { token: mod, data: { name: 'user', role: 'admin' } })).status, 403);
+    const users = (await call('/v1/admin/users', { token: mod })).body.users;
+    assert.equal(users.find(u => u.name === 'dzfx').role, 'superadmin');
+    assert.equal((await call('/v1/admin/users', { token: mod, data: { name: 'dzfx', action: 'ban' } })).status, 403);
+    assert.equal((await call('/v1/admin/users', { token: mod, data: { name: 'mod', action: 'ban' } })).status, 403);
+    assert.equal((await call('/v1/admin/users', { token: mod, data: { name: 'user', action: 'ban' } })).status, 200);
+    assert.equal((await call('/v1/admin/users', { token: boss, data: { name: 'mod', action: 'logout' } })).status, 200);
+    assert.equal((await call('/v1/admin/me', { token: mod })).status, 401);
+    assert.equal((await call('/v1/admin/stats', { token: user })).status, 401);
+    assert.equal((await call('/v1/admin/stats', { token: other })).status, 401);
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+    await rm(directory, { recursive: true, force: true });
+  }
+});

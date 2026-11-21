@@ -33,6 +33,7 @@ export async function createServer({ file, adminToken }) {
   state.nextReport ??= 1;
   state.removed ??= [];
   state.nextRemoval ??= 1;
+  state.roles ??= {};
   let createdAdminToken = null;
   if (adminToken !== undefined) {
     if (!adminPattern.test(adminToken)) throw new Error('admin token must be 64 hex characters');
@@ -114,10 +115,42 @@ export async function createServer({ file, adminToken }) {
     next.banned[name] = Date.now();
     for (const [key, value] of Object.entries(next.sessions)) if (value.user === name) delete next.sessions[key];
   }
+  const ranks = { user: 0, admin: 1, superadmin: 2, owner: 3 };
+  const roleOf = name => state.roles[name] || 'user';
+  /** Кто выполняет действие: владелец сервера (ключ) или пользователь с ролью admin/superadmin. */
+  function actor(req) {
+    if (isAdmin(req)) return { name: null, role: 'owner' };
+    const name = session(req);
+    if (!name || Object.hasOwn(state.banned, name)) return null;
+    const role = roleOf(name);
+    return ranks[role] >= ranks.admin ? { name, role } : null;
+  }
+  // Действовать можно только над теми, кто ниже по роли. Владелец (ключ) может всё.
+  const canTouch = (who, target) => who.role === 'owner' || (ranks[who.role] > ranks[roleOf(target)] && who.name !== target);
   async function admin(req, res, url) {
-    if (!allowed('admin:' + (req.socket.remoteAddress || 'unknown')) && !isAdmin(req)) return reply(res, 429, { error: 'too many attempts' });
-    if (!isAdmin(req)) return reply(res, 401, { error: 'admin key required' });
+    const who = actor(req);
+    if (!who) {
+      if (!allowed('admin:' + (req.socket.remoteAddress || 'unknown'))) return reply(res, 429, { error: 'too many attempts' });
+      return reply(res, 401, { error: 'admin access required' });
+    }
     const now = Date.now();
+    if (req.method === 'GET' && url.pathname === '/v1/admin/me') return reply(res, 200, { name: who.name, role: who.role });
+    if (req.method === 'POST' && url.pathname === '/v1/admin/roles') {
+      const input = await json(req, res);
+      if (!input) return;
+      const name = normalized(input.name);
+      const role = input.role;
+      if (!Object.hasOwn(state.users, name) || !['user', 'admin', 'superadmin'].includes(role)) return reply(res, 400, { error: 'invalid request' });
+      // Главный админ назначает и снимает обычных админов; главных назначает только владелец сервера.
+      const allowedChange = who.role === 'owner' || (who.role === 'superadmin' && role !== 'superadmin' && roleOf(name) !== 'superadmin' && name !== who.name);
+      if (!allowedChange) return reply(res, 403, { error: 'not allowed' });
+      await change(next => {
+        if (role === 'user') delete next.roles[name];
+        else next.roles[name] = role;
+        if (role !== 'user') delete next.banned[name];
+      });
+      return reply(res, 200, { ok: true });
+    }
     if (req.method === 'GET' && url.pathname === '/v1/admin/stats') {
       const recent = state.messages.filter(m => now - m.time < day);
       return reply(res, 200, {
@@ -140,7 +173,7 @@ export async function createServer({ file, adminToken }) {
         activity.set(m.from, entry);
       }
       const users = Object.keys(state.users).filter(name => name.includes(query)).map(name => ({
-        name, banned: Object.hasOwn(state.banned, name), ...(activity.get(name) || { messages: 0, lastActive: 0 }),
+        name, role: roleOf(name), banned: Object.hasOwn(state.banned, name), ...(activity.get(name) || { messages: 0, lastActive: 0 }),
       })).sort((a, b) => b.lastActive - a.lastActive || a.name.localeCompare(b.name)).slice(0, 200);
       return reply(res, 200, { users });
     }
@@ -149,6 +182,7 @@ export async function createServer({ file, adminToken }) {
       if (!input) return;
       const name = normalized(input.name);
       if (!Object.hasOwn(state.users, name) || !['ban', 'unban', 'logout'].includes(input.action)) return reply(res, 400, { error: 'invalid request' });
+      if (!canTouch(who, name)) return reply(res, 403, { error: 'not allowed' });
       await change(next => {
         if (input.action === 'ban') ban(next, name);
         else if (input.action === 'unban') delete next.banned[name];
@@ -165,6 +199,8 @@ export async function createServer({ file, adminToken }) {
       const input = await json(req, res);
       if (!input) return;
       if (!['dismiss', 'delete', 'ban', 'delete_ban'].includes(input.action)) return reply(res, 400, { error: 'invalid request' });
+      const pending = state.reports.find(r => r.id === input.id);
+      if (pending && input.action !== 'dismiss' && !canTouch(who, pending.target)) return reply(res, 403, { error: 'not allowed' });
       const found = await change(next => {
         const report = next.reports.find(r => r.id === input.id);
         if (!report) return false;

@@ -108,7 +108,33 @@ public final class AdminActivity extends Activity {
     private AdminApi api() {
         String server = this.preferences.getString("server", "");
         String key = this.preferences.getString("key", "");
-        return server.isEmpty() || key.isEmpty() ? null : new AdminApi(server, key);
+        String token = this.preferences.getString("token", "");
+        return server.isEmpty() || (key.isEmpty() && token.isEmpty()) ? null : new AdminApi(server, key, token);
+    }
+
+    private String myRole() {
+        return this.preferences.getString("role", "owner");
+    }
+
+    private String myName() {
+        return this.preferences.getString("name", "");
+    }
+
+    private static String roleTitle(String role) {
+        switch (role) {
+            case "owner":
+                return "владелец сервера";
+            case "superadmin":
+                return "главный админ";
+            case "admin":
+                return "админ";
+            default:
+                return "пользователь";
+        }
+    }
+
+    private void signOut() {
+        this.preferences.edit().remove("key").remove("token").remove("role").remove("name").apply();
     }
 
     // ---- Оформление ----
@@ -219,8 +245,30 @@ public final class AdminActivity extends Activity {
                 + "Для Node.js-сервера ключ печатается в консоли при первом запуске.", 14, muted(), false);
         hint.setPadding(0, dp(8.0f), 0, dp(18.0f));
         root.addView(hint);
+        LinearLayout account = card();
+        root.addView(account);
+        account.addView(text("Войти аккаунтом", 16, ink(), true));
+        TextView accountHint = text("Для админов и главного админа: тот же chatId и пароль, что в chatPuls.", 13, muted(), false);
+        accountHint.setPadding(0, dp(4.0f), 0, dp(4.0f));
+        account.addView(accountHint);
+        EditText accountServer = field("Адрес сервера (https://…)", this.preferences.getString("server", ""), InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
+        EditText chatId = field("chatId", this.preferences.getString("name", ""), InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
+        EditText password = field("Пароль", "", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        account.addView(accountServer);
+        account.addView(chatId);
+        account.addView(password);
+        Button accountLogin = button("Войти", accent(), true);
+        LinearLayout.LayoutParams accountParams = new LinearLayout.LayoutParams(-1, -2);
+        accountParams.topMargin = dp(10.0f);
+        account.addView(accountLogin, accountParams);
+        TextView accountStatus = text("", 13, muted(), false);
+        accountStatus.setPadding(0, dp(10.0f), 0, 0);
+        account.addView(accountStatus);
+        accountLogin.setOnClickListener(v -> loginWithAccount(accountServer, chatId, password, accountLogin, accountStatus));
+
         LinearLayout form = card();
         root.addView(form);
+        form.addView(text("Войти ключом сервера", 16, ink(), true));
         EditText server = field("Адрес сервера (https://…)", prefill != null ? prefill.server() : this.preferences.getString("server", ""), InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
         EditText key = field("Ключ администратора", prefill != null ? prefill.key() : "", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
         form.addView(server);
@@ -266,7 +314,7 @@ public final class AdminActivity extends Activity {
             this.worker.execute(() -> {
                 String error = null;
                 try {
-                    new AdminApi(base, secret).get("/v1/admin/stats");
+                    new AdminApi(base, secret, null).get("/v1/admin/stats");
                 } catch (AdminApi.Failure failure) {
                     error = failure.code == 401 ? "Неверный ключ" : failure.code == 429 ? "Слишком много попыток, подождите минуту"
                             : failure.code == 404 ? "Сервер не поддерживает модерацию — обновите chatPuls" : "Ошибка сервера " + failure.code;
@@ -283,9 +331,59 @@ public final class AdminActivity extends Activity {
                         status.setText(result);
                         return;
                     }
-                    this.preferences.edit().putString("server", base).putString("key", secret).apply();
+                    this.preferences.edit().putString("server", base).putString("key", secret).remove("token").putString("role", "owner").remove("name").apply();
                     showMain();
                 });
+            });
+        });
+    }
+
+    private void loginWithAccount(EditText serverField, EditText chatIdField, EditText passwordField, Button login, TextView status) {
+        final String base;
+        try {
+            base = AdminApi.normalizeUrl(serverField.getText().toString());
+        } catch (Exception e) {
+            serverField.setError("Нужен HTTPS-адрес сервера без пути");
+            return;
+        }
+        final String name = chatIdField.getText().toString().trim().toLowerCase();
+        final String secret = passwordField.getText().toString();
+        if (!name.matches("[a-z0-9_]{3,32}")) {
+            chatIdField.setError("chatId: 3–32 латинские буквы, цифры или _");
+            return;
+        }
+        login.setEnabled(false);
+        status.setText("Проверяем…");
+        this.worker.execute(() -> {
+            String error = null;
+            String token = null;
+            String role = null;
+            try {
+                JSONObject session = new AdminApi(base, null, null).post("/v1/login", new JSONObject().put("username", name).put("password", secret));
+                token = session.getString("token");
+                role = new AdminApi(base, null, token).get("/v1/admin/me").getString("role");
+            } catch (AdminApi.Failure failure) {
+                error = failure.code == 401 ? (token == null ? "Неверный chatId или пароль" : "У этого аккаунта нет прав модератора")
+                        : failure.code == 403 ? "Аккаунт заблокирован" : failure.code == 429 ? "Слишком много попыток, подождите минуту"
+                        : failure.code == 404 ? "Сервер не поддерживает роли — обновите chatPuls" : "Ошибка сервера " + failure.code;
+            } catch (Exception e) {
+                error = "Не удалось подключиться: " + e.getMessage();
+            }
+            final String finalError = error;
+            final String finalToken = token;
+            final String finalRole = role;
+            this.handler.post(() -> {
+                if (isDestroyed()) {
+                    return;
+                }
+                login.setEnabled(true);
+                if (finalError != null) {
+                    status.setText(finalError);
+                    return;
+                }
+                this.preferences.edit().putString("server", base).remove("key").putString("token", finalToken)
+                        .putString("role", finalRole).putString("name", name).apply();
+                showMain();
             });
         });
     }
@@ -302,7 +400,8 @@ public final class AdminActivity extends Activity {
         LinearLayout titles = column();
         header.addView(titles, new LinearLayout.LayoutParams(0, -2, 1.0f));
         titles.addView(text("chatPuls Admin", 20, ink(), true));
-        this.subtitle = text(this.preferences.getString("server", "").split("#", 2)[0], 12, muted(), false);
+        String who = myName().isEmpty() ? roleTitle(myRole()) : "@" + myName() + " · " + roleTitle(myRole());
+        this.subtitle = text(who + " · " + this.preferences.getString("server", "").split("#", 2)[0].replaceFirst("^https?://", ""), 12, muted(), false);
         this.subtitle.setSingleLine(true);
         this.subtitle.setEllipsize(TextUtils.TruncateAt.MIDDLE);
         titles.addView(this.subtitle);
@@ -312,7 +411,7 @@ public final class AdminActivity extends Activity {
         TextView menu = headerAction("⋯", "Меню");
         menu.setOnClickListener(v -> new AlertDialog.Builder(this).setItems(new String[]{"Сменить сервер", "Выйти"}, (dialog, which) -> {
             if (which == 1) {
-                this.preferences.edit().remove("key").apply();
+                signOut();
             }
             showLogin(null);
         }).show());
@@ -389,8 +488,8 @@ public final class AdminActivity extends Activity {
                     return;
                 }
                 if ("auth".equals(finalError)) {
-                    toast("Ключ больше не действует");
-                    this.preferences.edit().remove("key").apply();
+                    toast("Доступ больше не действует, войдите снова");
+                    signOut();
                     showLogin(null);
                 } else if (finalError != null) {
                     message(finalError);
@@ -412,7 +511,7 @@ public final class AdminActivity extends Activity {
                 api.post(path, body);
                 result = done;
             } catch (AdminApi.Failure failure) {
-                result = failure.code == 404 ? "Уже обработано" : "Ошибка сервера " + failure.code;
+                result = failure.code == 404 ? "Уже обработано" : failure.code == 403 ? "Недостаточно прав" : "Ошибка сервера " + failure.code;
             } catch (Exception e) {
                 result = "Нет связи с сервером";
             }
@@ -661,9 +760,71 @@ public final class AdminActivity extends Activity {
         });
     }
 
+    private void userActions(String name, String role, boolean banned) {
+        java.util.List<String> labels = new java.util.ArrayList<>();
+        java.util.List<Runnable> actions = new java.util.ArrayList<>();
+        boolean owner = myRole().equals("owner");
+        boolean superadmin = myRole().equals("superadmin");
+        if (!name.equals(myName())) {
+            labels.add(banned ? "Разбанить" : "Забанить");
+            actions.add(() -> {
+                Runnable run = () -> userAction(name, banned ? "unban" : "ban", banned ? "Пользователь разбанен" : "Пользователь забанен");
+                if (banned) {
+                    run.run();
+                } else {
+                    confirm("Забанить @" + name + "?", "Пользователь не сможет войти и писать, пока вы его не разбаните.", run);
+                }
+            });
+            labels.add("Завершить все сеансы");
+            actions.add(() -> userAction(name, "logout", "Сеансы завершены"));
+        }
+        if ((owner || superadmin) && !name.equals(myName())) {
+            if (role.equals("user")) {
+                labels.add("Сделать админом 🛡");
+                actions.add(() -> setRole(name, "admin", "@" + name + " теперь админ"));
+            }
+            if (role.equals("admin")) {
+                labels.add("Снять админа");
+                actions.add(() -> setRole(name, "user", "@" + name + " больше не админ"));
+            }
+        }
+        if (owner) {
+            if (!role.equals("superadmin")) {
+                labels.add("Сделать главным админом 👑");
+                actions.add(() -> confirm("Сделать @" + name + " главным админом?", "Главный админ сможет назначать и снимать админов и банить кого угодно, кроме других главных.",
+                        () -> setRole(name, "superadmin", "@" + name + " теперь главный админ")));
+            } else {
+                labels.add("Снять главного админа");
+                actions.add(() -> setRole(name, "user", "@" + name + " больше не главный админ"));
+            }
+        }
+        if (labels.isEmpty()) {
+            toast("Это вы");
+            return;
+        }
+        new AlertDialog.Builder(this).setTitle("@" + name + " · " + roleTitle(role))
+                .setItems(labels.toArray(new String[0]), (dialog, which) -> actions.get(which).run())
+                .setNegativeButton("Отмена", null).show();
+    }
+
+    private void userAction(String name, String action, String done) {
+        try {
+            act("/v1/admin/users", new JSONObject().put("name", name).put("action", action), done);
+        } catch (Exception ignored) {
+        }
+    }
+
+    private void setRole(String name, String role, String done) {
+        try {
+            act("/v1/admin/roles", new JSONObject().put("name", name).put("role", role), done);
+        } catch (Exception ignored) {
+        }
+    }
+
     private View userRow(JSONObject user) {
         final String name = user.optString("name");
         final boolean banned = user.optBoolean("banned");
+        final String role = user.optString("role", "user");
         LinearLayout row = new LinearLayout(this);
         row.setGravity(Gravity.CENTER_VERTICAL);
         row.setPadding(dp(14.0f), dp(12.0f), dp(14.0f), dp(12.0f));
@@ -680,7 +841,7 @@ public final class AdminActivity extends Activity {
         row.addView(avatar, avatarParams);
         LinearLayout info = column();
         row.addView(info, new LinearLayout.LayoutParams(0, -2, 1.0f));
-        info.addView(text("@" + name, 16, ink(), true));
+        info.addView(text("@" + name + (role.equals("superadmin") ? "  👑" : role.equals("admin") ? "  🛡" : ""), 16, ink(), true));
         long last = user.optLong("lastActive");
         String activity = user.optLong("messages") + " сообщ. · " + (last == 0 ? "ещё не писал(а)"
                 : "писал(а) " + DateUtils.getRelativeTimeSpanString(last, System.currentTimeMillis(), DateUtils.MINUTE_IN_MILLIS));
@@ -692,24 +853,7 @@ public final class AdminActivity extends Activity {
             row.addView(badge);
         }
         row.setClickable(true);
-        row.setOnClickListener(v -> {
-            String[] options = {banned ? "Разбанить" : "Забанить", "Завершить все сеансы"};
-            new AlertDialog.Builder(this).setTitle("@" + name).setItems(options, (dialog, which) -> {
-                String action = which == 1 ? "logout" : banned ? "unban" : "ban";
-                String done = which == 1 ? "Сеансы завершены" : banned ? "Пользователь разбанен" : "Пользователь забанен";
-                Runnable run = () -> {
-                    try {
-                        act("/v1/admin/users", new JSONObject().put("name", name).put("action", action), done);
-                    } catch (Exception ignored) {
-                    }
-                };
-                if (action.equals("ban")) {
-                    confirm("Забанить @" + name + "?", "Пользователь не сможет войти и писать, пока вы его не разбаните.", run);
-                } else {
-                    run.run();
-                }
-            }).setNegativeButton("Отмена", null).show();
-        });
+        row.setOnClickListener(v -> userActions(name, role, banned));
         return row;
     }
 }

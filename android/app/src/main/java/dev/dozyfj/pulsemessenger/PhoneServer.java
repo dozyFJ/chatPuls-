@@ -159,9 +159,10 @@ final class PhoneServer implements AutoCloseable {
                 if (auth && !allowed(socket.getInetAddress().getHostAddress())) {
                     throw new PhoneServerStore.Failure(429);
                 }
+                PhoneServerStore.Actor actor = null;
                 if (admin) {
                     try {
-                        this.store.requireAdmin(headers.get("x-pulse-admin"));
+                        actor = this.store.adminActor(headers.get("x-pulse-admin"), headers.get("authorization"));
                     } catch (PhoneServerStore.Failure failure) {
                         if (!allowed("admin:" + socket.getInetAddress().getHostAddress())) {
                             throw new PhoneServerStore.Failure(429);
@@ -193,7 +194,7 @@ final class PhoneServer implements AutoCloseable {
                 JSONObject result;
                 String query = uri.getRawQuery();
                 if (admin) {
-                    result = adminRequest(request[0], path, query, payload);
+                    result = adminRequest(actor, request[0], path, query, payload);
                 } else if (request[0].equals("GET") && path.equals("/health")) {
                     result = new JSONObject().put("ok", true);
                 } else if (auth) {
@@ -229,7 +230,7 @@ final class PhoneServer implements AutoCloseable {
         }
     }
 
-    private JSONObject adminRequest(String method, String path, String query, JSONObject payload) throws Exception {
+    private JSONObject adminRequest(PhoneServerStore.Actor actor, String method, String path, String query, JSONObject payload) throws Exception {
         Map<String, String> params = new HashMap<>();
         if (query != null) {
             for (String pair : query.split("&")) {
@@ -239,6 +240,12 @@ final class PhoneServer implements AutoCloseable {
                 }
             }
         }
+        if (method.equals("GET") && path.equals("/v1/admin/me")) {
+            return this.store.adminMe(actor);
+        }
+        if (method.equals("POST") && path.equals("/v1/admin/roles")) {
+            return this.store.adminRoles(actor, payload);
+        }
         if (method.equals("GET") && path.equals("/v1/admin/stats")) {
             return this.store.adminStats();
         }
@@ -246,13 +253,13 @@ final class PhoneServer implements AutoCloseable {
             return this.store.adminUsers(params.getOrDefault("q", ""));
         }
         if (method.equals("POST") && path.equals("/v1/admin/users")) {
-            return this.store.adminUserAction(payload);
+            return this.store.adminUserAction(actor, payload);
         }
         if (method.equals("GET") && path.equals("/v1/admin/reports")) {
             return this.store.adminReports("all".equals(params.get("status")));
         }
         if (method.equals("POST") && path.equals("/v1/admin/reports")) {
-            return this.store.adminReportAction(payload);
+            return this.store.adminReportAction(actor, payload);
         }
         throw new PhoneServerStore.Failure(404);
     }

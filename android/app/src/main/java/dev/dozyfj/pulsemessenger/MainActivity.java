@@ -1920,7 +1920,7 @@ public final class MainActivity extends Activity {
         LinearLayout.LayoutParams fieldParams = new LinearLayout.LayoutParams(0, -2, 1.0f);
         fieldParams.setMarginStart(dp(14.0f));
         details.addView(fields, fieldParams);
-        addProfileField(fields, "Имя пользователя", onlineAccount() ? "@" + user() : "");
+        addProfileField(fields, "chatId", onlineAccount() ? "@" + user() : "");
         addProfileField(fields, "Почта", this.preferences.getString(key + "email", ""));
         ImageView edit = new ImageView(this);
         edit.setImageResource(R.drawable.ic_profile_edit);
@@ -2409,10 +2409,10 @@ public final class MainActivity extends Activity {
                 TextView picked = text(selectedContact, 14, ink(), true);
                 picked.setPadding(0, dp(8.0f), 0, dp(4.0f));
                 panel.addView(picked);
-                panel.addView(text("Для чата введи имя пользователя Pulse.", 13, muted(), false));
+                panel.addView(text("Для чата введи chatId собеседника.", 13, muted(), false));
             }
         }
-        final EditText input = field("Имя пользователя (латиница, цифры, _)", 524289);
+        final EditText input = field("chatId собеседника (латиница, цифры, _)", 524289);
         input.setFilters(new InputFilter[]{new InputFilter.LengthFilter(32)});
         panel.addView(input, new LinearLayout.LayoutParams(-1, -2));
         Button open = button("Открыть", true);
@@ -2444,7 +2444,7 @@ public final class MainActivity extends Activity {
     public void openTypedChat(EditText input, Dialog sheet, View v) {
         String name = input.getText().toString().trim().toLowerCase(Locale.ROOT);
         if (!name.matches("[a-z0-9_]{3,32}") || name.equals(user())) {
-            input.setError("Введите другое имя: 3–32 символа");
+            input.setError("Введите другой chatId: 3–32 символа");
             return;
         }
         this.store.createChat(owner(), name);
@@ -3037,7 +3037,7 @@ public final class MainActivity extends Activity {
         final EditText server = field("Адрес сервера или ссылка подключения", 17);
         server.setText(this.preferences.getString("serverDraft", ""));
         card.addView(server);
-        final EditText username = field("Имя пользователя", 524289);
+        final EditText username = field("chatId", 524289);
         username.setFilters(new InputFilter[]{new InputFilter.LengthFilter(32)});
         card.addView(username);
         final EditText password = field("Пароль (минимум 10 символов)", 129);
@@ -3482,7 +3482,7 @@ public final class MainActivity extends Activity {
             final String name = username.getText().toString().trim().toLowerCase(Locale.ROOT);
             final String secret = password.getText().toString();
             if (!PhoneServerStore.validName(name)) {
-                username.setError("Выберите допустимое имя: 3–32 латинские буквы, цифры или _");
+                username.setError("chatId: 3–32 латинские буквы, цифры или _");
                 return;
             }
             if (secret.length() < 10 || secret.length() > 128) {
@@ -3540,13 +3540,15 @@ public final class MainActivity extends Activity {
             int code = ((PulseApi.ApiError) error).code;
             switch (code) {
                 case 400:
-                    return "Сервер отклонил имя или пароль";
+                    return "Сервер отклонил chatId или пароль";
                 case 401:
-                    return register ? "Сервер отклонил регистрацию" : "Неверное имя пользователя или пароль";
+                    return register ? "Сервер отклонил регистрацию" : "Неверный chatId или пароль";
                 case 404:
                     return "По этому адресу не найден API Pulse";
                 case 409:
-                    return register ? "Имя уже занято. Войдите или выберите другое имя" : "Конфликт при входе";
+                    return register ? "Этот chatId уже занят. Войдите или выберите другой" : "Конфликт при входе";
+                case 403:
+                    return "Аккаунт заблокирован модератором";
                 case 429:
                     return "Слишком много попыток. Повторите через минуту";
                 default:

@@ -21,7 +21,7 @@ final class PhoneServerStore extends SQLiteOpenHelper {
     private final Context context;
 
     PhoneServerStore(Context context) {
-        super(context.getApplicationContext(), "pulse-host.db", null, 3);
+        super(context.getApplicationContext(), "pulse-host.db", null, 4);
         this.context = context.getApplicationContext();
     }
 
@@ -39,6 +39,11 @@ final class PhoneServerStore extends SQLiteOpenHelper {
         db.execSQL("CREATE TABLE banned (name TEXT PRIMARY KEY, created INTEGER NOT NULL)");
         db.execSQL("CREATE TABLE reports (id INTEGER PRIMARY KEY AUTOINCREMENT, reporter TEXT NOT NULL, target TEXT NOT NULL, message_id TEXT, message_text TEXT NOT NULL DEFAULT '', reason TEXT NOT NULL, created INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'open', resolved INTEGER)");
         db.execSQL("CREATE TABLE removed (rseq INTEGER PRIMARY KEY AUTOINCREMENT, sender TEXT NOT NULL, id TEXT NOT NULL, recipient TEXT NOT NULL, created INTEGER NOT NULL)");
+        createRolesTable(db);
+    }
+
+    private static void createRolesTable(SQLiteDatabase db) {
+        db.execSQL("CREATE TABLE IF NOT EXISTS roles (name TEXT PRIMARY KEY, role TEXT NOT NULL)");
     }
 
     @Override
@@ -48,6 +53,9 @@ final class PhoneServerStore extends SQLiteOpenHelper {
         }
         if (oldVersion < 3) {
             createModerationTables(db);
+        }
+        if (oldVersion < 4) {
+            createRolesTable(db);
         }
     }
 
@@ -282,14 +290,91 @@ final class PhoneServerStore extends SQLiteOpenHelper {
         return token;
     }
 
-    void requireAdmin(String header) throws Exception {
-        if (header == null || !header.matches("[a-f0-9]{64}")) {
+    /** Кто действует в админке: владелец сервера по ключу или пользователь с ролью. */
+    record Actor(String name, String role) {
+        boolean owner() {
+            return this.name == null;
+        }
+    }
+
+    private static int rank(String role) {
+        switch (role) {
+            case "owner":
+                return 3;
+            case "superadmin":
+                return 2;
+            case "admin":
+                return 1;
+            default:
+                return 0;
+        }
+    }
+
+    private static String roleOf(SQLiteDatabase db, String name) {
+        try (Cursor c = db.rawQuery("SELECT role FROM roles WHERE name = ?", new String[]{name})) {
+            return c.moveToFirst() ? c.getString(0) : "user";
+        }
+    }
+
+    /** Над кем можно действовать: только над теми, кто ниже по роли. Владелец может всё. */
+    private static boolean canTouch(SQLiteDatabase db, Actor actor, String target) {
+        return actor.owner() || (rank(actor.role()) > rank(roleOf(db, target)) && !target.equals(actor.name()));
+    }
+
+    synchronized Actor adminActor(String keyHeader, String authorization) throws Exception {
+        if (keyHeader != null && keyHeader.matches("[a-f0-9]{64}")) {
+            byte[] expected = hash(adminToken(this.context)).getBytes(StandardCharsets.US_ASCII);
+            if (MessageDigest.isEqual(expected, hash(keyHeader).getBytes(StandardCharsets.US_ASCII))) {
+                return new Actor(null, "owner");
+            }
             throw new Failure(401);
         }
-        byte[] expected = hash(adminToken(this.context)).getBytes(StandardCharsets.US_ASCII);
-        if (!MessageDigest.isEqual(expected, hash(header).getBytes(StandardCharsets.US_ASCII))) {
+        String name;
+        try {
+            name = user(authorization);
+        } catch (Failure failure) {
             throw new Failure(401);
         }
+        String role = roleOf(getReadableDatabase(), name);
+        if (rank(role) < 1) {
+            throw new Failure(401);
+        }
+        return new Actor(name, role);
+    }
+
+    JSONObject adminMe(Actor actor) throws Exception {
+        return new JSONObject().put("name", actor.owner() ? JSONObject.NULL : actor.name()).put("role", actor.role());
+    }
+
+    synchronized JSONObject adminRoles(Actor actor, JSONObject input) throws Exception {
+        String name = input.optString("name", "").trim().toLowerCase(Locale.ROOT);
+        String role = input.optString("role", "");
+        if (!userExists(name) || !(role.equals("user") || role.equals("admin") || role.equals("superadmin"))) {
+            throw new Failure(400);
+        }
+        SQLiteDatabase db = getWritableDatabase();
+        // Главный админ назначает и снимает обычных админов; главных назначает только владелец сервера.
+        boolean allowed = actor.owner() || (actor.role().equals("superadmin") && !role.equals("superadmin")
+                && !roleOf(db, name).equals("superadmin") && !name.equals(actor.name()));
+        if (!allowed) {
+            throw new Failure(403);
+        }
+        db.beginTransaction();
+        try {
+            if (role.equals("user")) {
+                db.delete("roles", "name = ?", new String[]{name});
+            } else {
+                ContentValues values = new ContentValues();
+                values.put("name", name);
+                values.put("role", role);
+                db.insertWithOnConflict("roles", null, values, SQLiteDatabase.CONFLICT_REPLACE);
+                db.delete("banned", "name = ?", new String[]{name});
+            }
+            db.setTransactionSuccessful();
+        } finally {
+            db.endTransaction();
+        }
+        return new JSONObject().put("ok", true);
     }
 
     synchronized JSONObject report(String user, JSONObject input) throws Exception {
@@ -353,21 +438,24 @@ final class PhoneServerStore extends SQLiteOpenHelper {
     synchronized JSONObject adminUsers(String query) throws Exception {
         String pattern = "%" + query.trim().toLowerCase(Locale.ROOT).replace("\\", "").replace("%", "").replace("_", "\\_") + "%";
         JSONArray users = new JSONArray();
-        try (Cursor c = getReadableDatabase().rawQuery("SELECT u.name, EXISTS(SELECT 1 FROM banned b WHERE b.name = u.name), (SELECT COUNT(*) FROM messages m WHERE m.sender = u.name), COALESCE((SELECT MAX(created) FROM messages m WHERE m.sender = u.name), 0) AS last FROM users u WHERE u.name LIKE ? ESCAPE '\\' ORDER BY last DESC, u.name LIMIT 200", new String[]{pattern})) {
+        try (Cursor c = getReadableDatabase().rawQuery("SELECT u.name, EXISTS(SELECT 1 FROM banned b WHERE b.name = u.name), COALESCE((SELECT role FROM roles r WHERE r.name = u.name), 'user'), (SELECT COUNT(*) FROM messages m WHERE m.sender = u.name), COALESCE((SELECT MAX(created) FROM messages m WHERE m.sender = u.name), 0) AS last FROM users u WHERE u.name LIKE ? ESCAPE '\\' ORDER BY last DESC, u.name LIMIT 200", new String[]{pattern})) {
             while (c.moveToNext()) {
-                users.put(new JSONObject().put("name", c.getString(0)).put("banned", c.getInt(1) != 0).put("messages", c.getLong(2)).put("lastActive", c.getLong(3)));
+                users.put(new JSONObject().put("name", c.getString(0)).put("banned", c.getInt(1) != 0).put("role", c.getString(2)).put("messages", c.getLong(3)).put("lastActive", c.getLong(4)));
             }
         }
         return new JSONObject().put("users", users);
     }
 
-    synchronized JSONObject adminUserAction(JSONObject input) throws Exception {
+    synchronized JSONObject adminUserAction(Actor actor, JSONObject input) throws Exception {
         String name = input.optString("name", "").trim().toLowerCase(Locale.ROOT);
         String action = input.optString("action", "");
         if (!userExists(name) || !(action.equals("ban") || action.equals("unban") || action.equals("logout"))) {
             throw new Failure(400);
         }
         SQLiteDatabase db = getWritableDatabase();
+        if (!canTouch(db, actor, name)) {
+            throw new Failure(403);
+        }
         if (action.equals("unban")) {
             db.delete("banned", "name = ?", new String[]{name});
         } else {
@@ -406,7 +494,7 @@ final class PhoneServerStore extends SQLiteOpenHelper {
         return new JSONObject().put("reports", reports);
     }
 
-    synchronized JSONObject adminReportAction(JSONObject input) throws Exception {
+    synchronized JSONObject adminReportAction(Actor actor, JSONObject input) throws Exception {
         long id = input.optLong("id", -1);
         String action = input.optString("action", "");
         if (!(action.equals("dismiss") || action.equals("delete") || action.equals("ban") || action.equals("delete_ban"))) {
@@ -421,6 +509,9 @@ final class PhoneServerStore extends SQLiteOpenHelper {
             }
             target = c.getString(0);
             messageId = c.isNull(1) ? null : c.getString(1);
+        }
+        if (!action.equals("dismiss") && !canTouch(db, actor, target)) {
+            throw new Failure(403);
         }
         db.beginTransaction();
         try {

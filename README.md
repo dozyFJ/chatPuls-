@@ -96,4 +96,13 @@ gradle -p android --no-daemon :app:assembleDebug
 
 Возможности: статистика, очередь жалоб (пользователи жалуются из chatPuls долгим нажатием на сообщение или через меню чата), удаление сообщений (они исчезают у обоих собеседников при синхронизации), баны и завершение сеансов.
 
-Admin API: заголовок `X-Pulse-Admin: <ключ>`; `GET /v1/admin/stats`, `GET /v1/admin/users?q=`, `POST /v1/admin/users {name, action: ban|unban|logout}`, `GET /v1/admin/reports[?status=all]`, `POST /v1/admin/reports {id, action: dismiss|delete|ban|delete_ban}`. Пользовательский `POST /v1/reports {to, id?, reason}`.
+### Роли
+
+- **Пользователь** — обычный аккаунт.
+- **Админ 🛡** — модерирует жалобы, банит обычных пользователей. Входит в chatPuls Admin своим chatId и паролем.
+- **Главный админ 👑** — всё то же, плюс назначает и снимает админов и может банить админов.
+- **Владелец сервера** (ключ администратора) — может всё, в том числе назначать главных админов.
+
+Чтобы стать главным админом: войдите в chatPuls Admin ключом сервера, откройте «Пользователи», выберите свой chatId → «Сделать главным админом». Потом можно входить аккаунтом.
+
+Admin API: заголовок `X-Pulse-Admin: <ключ>` или `Authorization: Bearer <сеанс>` аккаунта с ролью; `GET /v1/admin/me`, `POST /v1/admin/roles {name, role: user|admin|superadmin}`, `GET /v1/admin/stats`, `GET /v1/admin/users?q=`, `POST /v1/admin/users {name, action: ban|unban|logout}`, `GET /v1/admin/reports[?status=all]`, `POST /v1/admin/reports {id, action: dismiss|delete|ban|delete_ban}`. Пользовательский `POST /v1/reports {to, id?, reason}`.

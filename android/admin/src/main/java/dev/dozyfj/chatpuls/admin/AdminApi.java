@@ -42,10 +42,13 @@ final class AdminApi {
 
     private final String base;
     private final String key;
+    private final String token;
 
-    AdminApi(String base, String key) {
+    /** key — ключ владельца сервера; token — сеанс аккаунта с ролью admin/superadmin. Нужно одно из двух. */
+    AdminApi(String base, String key, String token) {
         this.base = base;
         this.key = key;
+        this.token = token;
     }
 
     /** Достаёт адрес и ключ из текста, которым поделился chatPuls («Ключ администратора»). */
@@ -101,7 +104,11 @@ final class AdminApi {
             connection.setConnectTimeout(8000);
             connection.setReadTimeout(15000);
             connection.setInstanceFollowRedirects(false);
-            connection.setRequestProperty("X-Pulse-Admin", this.key);
+            if (this.key != null && !this.key.isEmpty()) {
+                connection.setRequestProperty("X-Pulse-Admin", this.key);
+            } else if (this.token != null && !this.token.isEmpty()) {
+                connection.setRequestProperty("Authorization", "Bearer " + this.token);
+            }
             if (payload != null) {
                 byte[] bytes = payload.toString().getBytes(StandardCharsets.UTF_8);
                 connection.setRequestMethod("POST");
