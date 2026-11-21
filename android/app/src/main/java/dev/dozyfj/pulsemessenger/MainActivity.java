@@ -180,6 +180,7 @@ public final class MainActivity extends Activity {
     private TextView pullRefreshHint;
     private boolean pullingRefresh;
     private View pulseBrand;
+    private TextView profileShortcut;
     private LinearLayout mainDock;
     private HorizontalScrollView mainSectionStrip;
     private File recordingFile;
@@ -656,6 +657,11 @@ public final class MainActivity extends Activity {
         headerLine.addView(this.pulseBrand, new FrameLayout.LayoutParams(-2, dp(40.0f), Gravity.CENTER));
         this.headerBack = headerControl("‹");
         headingRow.addView(this.headerBack, new LinearLayout.LayoutParams(dp(40.0f), dp(40.0f)));
+        this.profileShortcut = text("Профиль", 13, headerInk(), true);
+        this.profileShortcut.setGravity(Gravity.CENTER);
+        this.profileShortcut.setFocusable(true);
+        this.profileShortcut.setOnClickListener(v -> openMainWall());
+        headingRow.addView(this.profileShortcut, new LinearLayout.LayoutParams(dp(78.0f), dp(44.0f)));
         this.settingsTabs = buildSettingsTabs(headingRow);
         buildClipsTabs(headingRow);
         LinearLayout heading = column();
@@ -1015,7 +1021,6 @@ public final class MainActivity extends Activity {
         this.mainSectionStrip.setPadding(dp(16.0f), dp(8.0f), dp(16.0f), 0);
         LinearLayout row = new LinearLayout(this);
         this.mainSectionStrip.addView(row, new FrameLayout.LayoutParams(-2, -2));
-        addMainSection(row, "Профиль", this::openMainWall);
         addMainSection(row, "Настройки", () -> openPage(2));
         addMainSection(row, "Каналы", () -> selectAllChatsTab(2));
         addMainSection(row, "Сообщества", () -> selectAllChatsTab(3));
@@ -1072,11 +1077,10 @@ public final class MainActivity extends Activity {
         }
         int selected;
         switch (this.page) {
-            case 2: selected = 1; break;
-            case 0: selected = this.allChatsTab == 2 ? 2 : -1; break;
-            case 4: selected = 3; break;
-            case 5: selected = 4; break;
-            case 6: selected = 0; break;
+            case 2: selected = 0; break;
+            case 0: selected = this.allChatsTab == 2 ? 1 : -1; break;
+            case 4: selected = 2; break;
+            case 5: selected = 3; break;
             default: selected = -1;
         }
         LinearLayout row = (LinearLayout) this.mainSectionStrip.getChildAt(0);
@@ -4983,6 +4987,11 @@ public final class MainActivity extends Activity {
             return;
         }
         boolean chatHeader = this.peer == null && isMainPage();
+        this.profileShortcut.setVisibility(chatHeader && !this.searchMode ? View.VISIBLE : View.GONE);
+        boolean ownProfile = this.page == 6 && this.openProfile == null && !this.friendsOpen;
+        this.profileShortcut.setSelected(ownProfile);
+        this.profileShortcut.setTextColor(ownProfile ? onHeaderAccent() : headerInk());
+        this.profileShortcut.setBackground(ownProfile ? headerAccentPill() : glass(22));
         renderDock();
         this.headerTitle.setVisibility(this.peer != null ? View.VISIBLE : View.GONE);
         this.notificationsButton.setVisibility(chatHeader ? View.VISIBLE : View.GONE);
