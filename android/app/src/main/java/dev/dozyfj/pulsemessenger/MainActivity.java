@@ -137,7 +137,6 @@ public final class MainActivity extends Activity {
     private LinearLayout compose;
     private LinearLayout content;
     private Button createButton;
-    private Button callsShortcut;
     private boolean dark;
     private TextView drawerClose;
     private TextView drawerTitle;
@@ -181,7 +180,7 @@ public final class MainActivity extends Activity {
     private TextView pullRefreshHint;
     private boolean pullingRefresh;
     private View pulseBrand;
-    private FrameLayout mainDock;
+    private LinearLayout mainDock;
     private HorizontalScrollView mainSectionStrip;
     private File recordingFile;
     private String requestedVoicePeer;
@@ -769,12 +768,6 @@ public final class MainActivity extends Activity {
         fabParams.bottomMargin = dp(18.0f);
         fabParams.height = dp(54.0f);
         body.addView(this.createButton, fabParams);
-        this.callsShortcut = floatingButton("☎  Звонки", "Звонки");
-        this.callsShortcut.setOnClickListener(v -> selectAllChatsTab(6));
-        FrameLayout.LayoutParams callsParams = new FrameLayout.LayoutParams(-2, dp(54.0f), Gravity.BOTTOM | Gravity.RIGHT);
-        callsParams.rightMargin = dp(18.0f);
-        callsParams.bottomMargin = dp(80.0f);
-        body.addView(this.callsShortcut, callsParams);
         this.alphabetRail = new AlphabetRail();
         FrameLayout.LayoutParams railParams = new FrameLayout.LayoutParams(dp(26.0f), -1, Gravity.RIGHT);
         railParams.setMargins(0, dp(10.0f), dp(6.0f), dp(84.0f));
@@ -788,15 +781,13 @@ public final class MainActivity extends Activity {
         body.addView(this.pullRefreshHint, new FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL));
         this.compose = column();
         column.addView(this.compose, new LinearLayout.LayoutParams(-1, -2));
-        this.mainDock = new FrameLayout(this);
-        this.mainDock.setPadding(0, dp(4.0f), 0, dp(4.0f));
+        this.mainDock = new LinearLayout(this);
+        this.mainDock.setPadding(dp(8.0f), dp(4.0f), dp(8.0f), dp(4.0f));
         this.mainDock.setBackground(barSurface(this.dark ? 0xA022262B : 0xA0F1F5F9, Gravity.TOP));
-        TextView mainButton = text("Главная", 14, ink(), true);
-        mainButton.setGravity(Gravity.CENTER);
-        mainButton.setFocusable(true);
-        mainButton.setBackground(glass(22));
-        mainButton.setOnClickListener(v -> openMainWall());
-        this.mainDock.addView(mainButton, new FrameLayout.LayoutParams(dp(96.0f), dp(44.0f), Gravity.CENTER));
+        addDockTab("Главная", this::openMainWall);
+        addDockTab("Чаты", this::showMainMessages);
+        addDockTab("Контакты", () -> selectAllChatsTab(4));
+        addDockTab("Звонки", () -> selectAllChatsTab(6));
         column.addView(this.mainDock, new LinearLayout.LayoutParams(-1, -2));
         buildFeedDrawer(frameLayout, background);
     }
@@ -828,7 +819,6 @@ public final class MainActivity extends Activity {
                         && (isMainPage() || this.peer != null)
                         && containsTouch(this.scroll, event) && !this.scroll.canScrollVertically(1)
                         && !containsTouch(this.alphabetRail, event) && !containsTouch(this.createButton, event)
-                        && !containsTouch(this.callsShortcut, event)
                         && !containsTouch(this.scrollActions, event);
                 this.pullingRefresh = false;
                 this.swipedChat = null;
@@ -1027,11 +1017,8 @@ public final class MainActivity extends Activity {
         this.mainSectionStrip.addView(row, new FrameLayout.LayoutParams(-2, -2));
         addMainSection(row, "Профиль", this::openMainWall);
         addMainSection(row, "Настройки", () -> openPage(2));
-        addMainSection(row, "Чаты", this::showMainMessages);
         addMainSection(row, "Каналы", () -> selectAllChatsTab(2));
         addMainSection(row, "Сообщества", () -> selectAllChatsTab(3));
-        addMainSection(row, "Контакты", () -> selectAllChatsTab(4));
-        addMainSection(row, "Звонки", () -> selectAllChatsTab(6));
         addMainSection(row, "Клипы", () -> openPage(5));
         root.addView(this.mainSectionStrip, new LinearLayout.LayoutParams(-1, -2));
     }
@@ -1049,6 +1036,34 @@ public final class MainActivity extends Activity {
         row.addView(tab, params);
     }
 
+    private void addDockTab(String label, Runnable action) {
+        TextView tab = text(label, 13, ink(), true);
+        tab.setGravity(Gravity.CENTER);
+        tab.setFocusable(true);
+        tab.setOnClickListener(v -> action.run());
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, dp(44.0f), 1.0f);
+        if (this.mainDock.getChildCount() > 0) {
+            params.setMarginStart(dp(4.0f));
+        }
+        this.mainDock.addView(tab, params);
+    }
+
+    private void renderDock() {
+        boolean visible = this.peer == null && !this.searchMode;
+        this.mainDock.setVisibility(visible ? View.VISIBLE : View.GONE);
+        if (!visible) {
+            return;
+        }
+        int selected = isChatsPage() ? 1 : this.page == 1 ? 2 : this.page == 7 ? 3 : 0;
+        for (int i = 0; i < this.mainDock.getChildCount(); i++) {
+            TextView tab = (TextView) this.mainDock.getChildAt(i);
+            boolean active = i == selected;
+            tab.setSelected(active);
+            tab.setTextColor(active ? onAccent() : ink());
+            tab.setBackground(active ? accentPill(22) : glass(22));
+        }
+    }
+
     private void renderMainSections() {
         boolean visible = this.peer == null && !this.searchMode;
         this.mainSectionStrip.setVisibility(visible ? View.VISIBLE : View.GONE);
@@ -1058,12 +1073,11 @@ public final class MainActivity extends Activity {
         int selected;
         switch (this.page) {
             case 2: selected = 1; break;
-            case 0: selected = this.allChatsTab == 2 ? 3 : 2; break;
-            case 4: selected = 4; break;
-            case 1: selected = 5; break;
-            case 7: selected = 6; break;
-            case 5: selected = 7; break;
-            default: selected = 0;
+            case 0: selected = this.allChatsTab == 2 ? 2 : -1; break;
+            case 4: selected = 3; break;
+            case 5: selected = 4; break;
+            case 6: selected = 0; break;
+            default: selected = -1;
         }
         LinearLayout row = (LinearLayout) this.mainSectionStrip.getChildAt(0);
         for (int i = 0; i < row.getChildCount(); i++) {
@@ -1073,8 +1087,12 @@ public final class MainActivity extends Activity {
             tab.setTextColor(active ? onAccent() : ink());
             tab.setBackground(active ? accentPill(22) : surface(0, 22, surfaceOutline()));
         }
-        row.getChildAt(selected).post(() -> {
-            View tab = row.getChildAt(selected);
+        if (selected < 0) {
+            return;
+        }
+        View activeTab = row.getChildAt(selected);
+        activeTab.post(() -> {
+            View tab = activeTab;
             if (tab.isSelected() && tab.isShown()) {
                 tab.requestRectangleOnScreen(new Rect(0, 0, tab.getWidth(), tab.getHeight()), true);
             }
@@ -1120,8 +1138,6 @@ public final class MainActivity extends Activity {
             this.createButton.setContentDescription(label);
         }
         this.createButton.setVisibility(showFab ? View.VISIBLE : View.GONE);
-        boolean showCallsShortcut = showFab && isChatsPage();
-        this.callsShortcut.setVisibility(showCallsShortcut ? View.VISIBLE : View.GONE);
         FrameLayout.LayoutParams refreshHintParams = (FrameLayout.LayoutParams) this.pullRefreshHint.getLayoutParams();
         refreshHintParams.bottomMargin = dp(showFab ? 80.0f : 12.0f);
         this.pullRefreshHint.setLayoutParams(refreshHintParams);
@@ -1130,7 +1146,7 @@ public final class MainActivity extends Activity {
         }
         this.scrollActions.setVisibility((showFab && this.page == 0) ? View.VISIBLE : View.GONE);
         this.alphabetRail.setVisibility(View.GONE);
-        int reservedBottom = showCallsShortcut ? 148 : showFab ? 86 : 12;
+        int reservedBottom = showFab ? 86 : 12;
         this.content.setPadding(dp(16.0f), dp(12.0f), dp(16.0f), dp(reservedBottom));
         if (this.searchMode && this.peer == null) {
             showSearchResults();
@@ -4967,7 +4983,7 @@ public final class MainActivity extends Activity {
             return;
         }
         boolean chatHeader = this.peer == null && isMainPage();
-        this.mainDock.setVisibility(this.peer == null && !this.searchMode ? View.VISIBLE : View.GONE);
+        renderDock();
         this.headerTitle.setVisibility(this.peer != null ? View.VISIBLE : View.GONE);
         this.notificationsButton.setVisibility(chatHeader ? View.VISIBLE : View.GONE);
         this.searchButton.setVisibility(chatHeader ? View.VISIBLE : View.GONE);
