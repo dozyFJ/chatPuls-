@@ -138,7 +138,6 @@ public final class MainActivity extends Activity {
     private LinearLayout content;
     private Button createButton;
     private Button callsShortcut;
-    private HorizontalScrollView profileTabStrip;
     private boolean dark;
     private TextView drawerClose;
     private TextView drawerTitle;
@@ -182,7 +181,7 @@ public final class MainActivity extends Activity {
     private TextView pullRefreshHint;
     private boolean pullingRefresh;
     private View pulseBrand;
-    private TextView mainMenuButton;
+    private FrameLayout mainDock;
     private HorizontalScrollView mainSectionStrip;
     private File recordingFile;
     private String requestedVoicePeer;
@@ -658,12 +657,6 @@ public final class MainActivity extends Activity {
         headerLine.addView(this.pulseBrand, new FrameLayout.LayoutParams(-2, dp(40.0f), Gravity.CENTER));
         this.headerBack = headerControl("‹");
         headingRow.addView(this.headerBack, new LinearLayout.LayoutParams(dp(40.0f), dp(40.0f)));
-        this.mainMenuButton = text("Главная", 14, headerInk(), true);
-        this.mainMenuButton.setGravity(Gravity.CENTER);
-        this.mainMenuButton.setFocusable(true);
-        this.mainMenuButton.setBackground(glass(22));
-        this.mainMenuButton.setOnClickListener(v -> openMainWall());
-        headingRow.addView(this.mainMenuButton, new LinearLayout.LayoutParams(dp(80.0f), dp(44.0f)));
         this.settingsTabs = buildSettingsTabs(headingRow);
         buildClipsTabs(headingRow);
         LinearLayout heading = column();
@@ -729,7 +722,6 @@ public final class MainActivity extends Activity {
         headingRow.addView(this.headerAction, new LinearLayout.LayoutParams(dp(38.0f), dp(40.0f)));
         buildSearchPanel(headerLine);
         buildMainSections(column);
-        buildProfileTabs(column);
         buildCallFilters(column);
         FrameLayout body = new FrameLayout(this);
         this.body = body;
@@ -796,6 +788,16 @@ public final class MainActivity extends Activity {
         body.addView(this.pullRefreshHint, new FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL));
         this.compose = column();
         column.addView(this.compose, new LinearLayout.LayoutParams(-1, -2));
+        this.mainDock = new FrameLayout(this);
+        this.mainDock.setPadding(0, dp(4.0f), 0, dp(4.0f));
+        this.mainDock.setBackground(barSurface(this.dark ? 0xA022262B : 0xA0F1F5F9, Gravity.TOP));
+        TextView mainButton = text("Главная", 14, ink(), true);
+        mainButton.setGravity(Gravity.CENTER);
+        mainButton.setFocusable(true);
+        mainButton.setBackground(glass(22));
+        mainButton.setOnClickListener(v -> openMainWall());
+        this.mainDock.addView(mainButton, new FrameLayout.LayoutParams(dp(96.0f), dp(44.0f), Gravity.CENTER));
+        column.addView(this.mainDock, new LinearLayout.LayoutParams(-1, -2));
         buildFeedDrawer(frameLayout, background);
     }
 
@@ -1108,7 +1110,6 @@ public final class MainActivity extends Activity {
         updateHeader();
         this.pulseBrand.setVisibility(isMainPage() && this.peer == null ? View.VISIBLE : View.GONE);
         renderMainSections();
-        renderProfileTabs();
         renderCallFilters();
         renderSectionTabs();
         boolean showEmptySection = this.page == 0 && isMainSectionOpen() && this.allChatsTab != 0;
@@ -1294,47 +1295,6 @@ public final class MainActivity extends Activity {
 
     private boolean isChatsPage() {
         return this.page == 0 && this.allChatsTab == 0;
-    }
-
-    private void buildProfileTabs(LinearLayout root) {
-        this.profileTabStrip = new HorizontalScrollView(this);
-        this.profileTabStrip.setHorizontalScrollBarEnabled(false);
-        this.profileTabStrip.setClipToPadding(false);
-        this.profileTabStrip.setPadding(dp(16.0f), dp(8.0f), dp(16.0f), 0);
-        LinearLayout tabs = new LinearLayout(this);
-        this.profileTabStrip.addView(tabs, new FrameLayout.LayoutParams(-2, -2));
-        for (int i = 0; i < PROFILE_SECTIONS.length; i++) {
-            final int section = i;
-            TextView choice = text(PROFILE_SECTIONS[i], 14, ink(), true);
-            choice.setGravity(Gravity.CENTER);
-            choice.setPadding(dp(14.0f), 0, dp(14.0f), 0);
-            choice.setFocusable(true);
-            choice.setOnClickListener(v -> selectProfileTab(section));
-            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-2, dp(44.0f));
-            if (i > 0) {
-                params.setMarginStart(dp(6.0f));
-            }
-            tabs.addView(choice, params);
-        }
-        root.addView(this.profileTabStrip, new LinearLayout.LayoutParams(-1, -2));
-    }
-
-    private void renderProfileTabs() {
-        boolean profile = this.page == 6 && this.openProfile == null && !this.friendsOpen;
-        boolean visible = this.peer == null && !this.searchMode && (profile || isChatsPage());
-        this.profileTabStrip.setVisibility(visible ? View.VISIBLE : View.GONE);
-        if (!visible) {
-            return;
-        }
-        LinearLayout tabs = (LinearLayout) this.profileTabStrip.getChildAt(0);
-        int selected = isChatsPage() ? PROFILE_CHATS : this.feedSection;
-        for (int i = 0; i < tabs.getChildCount(); i++) {
-            TextView choice = (TextView) tabs.getChildAt(i);
-            boolean active = i == selected;
-            choice.setSelected(active);
-            choice.setTextColor(active ? onAccent() : ink());
-            choice.setBackground(active ? accentPill(22) : surface(0, 22, surfaceOutline()));
-        }
     }
 
     private void selectProfileTab(int section) {
@@ -1706,7 +1666,7 @@ public final class MainActivity extends Activity {
         this.feedContent.removeAllViews();
         if (!this.notificationDrawer) {
             showStories(this.feedContent);
-            showMyWall(this.feedContent);
+            showMyWall(this.feedContent, false);
             return;
         }
         this.alertsChoice.setSelected(!this.eventsSelected);
@@ -1928,7 +1888,7 @@ public final class MainActivity extends Activity {
             showRecommendations();
         } else {
             showStories(this.content);
-            showMyWall(this.content);
+            showMyWall(this.content, true);
             if (onlineAccount()) {
                 showPostComposer();
                 showServerFeed();
@@ -3161,7 +3121,7 @@ public final class MainActivity extends Activity {
     }
 
     /** Шапка профиля: фон (своё фото), аватар поверх фона, chatId и почта. */
-    private void showMyWall(LinearLayout parent) {
+    private void showMyWall(LinearLayout parent, boolean showSections) {
         String key = wallProfileKey();
         FrameLayout backdrop = new FrameLayout(this);
         backdrop.setBackground(glass(22));
@@ -3266,6 +3226,30 @@ public final class MainActivity extends Activity {
         addProfileField(fields, "chatId", onlineAccount() ? "@" + user() : "");
         addProfileField(fields, "Почта", this.preferences.getString(key + "email", ""));
         addSocialCounters(fields);
+        if (showSections) {
+            LinearLayout tabs = new LinearLayout(this);
+            LinearLayout.LayoutParams tabsParams = new LinearLayout.LayoutParams(-1, -2);
+            tabsParams.setMargins(dp(12.0f), 0, dp(12.0f), dp(12.0f));
+            card.addView(tabs, tabsParams);
+            addProfileSection(tabs, "Стена", PROFILE_FEED);
+            addProfileSection(tabs, "Фото", PROFILE_ALBUM);
+            addProfileSection(tabs, "Реки", PROFILE_RECS);
+        }
+    }
+
+    private void addProfileSection(LinearLayout tabs, String label, int section) {
+        boolean selected = this.feedSection == section;
+        TextView tab = text(label, 14, selected ? onAccent() : ink(), true);
+        tab.setGravity(Gravity.CENTER);
+        tab.setFocusable(true);
+        tab.setSelected(selected);
+        tab.setBackground(selected ? accentPill(22) : surface(0, 22, surfaceOutline()));
+        tab.setOnClickListener(v -> selectProfileTab(section));
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, dp(44.0f), 1.0f);
+        if (tabs.getChildCount() > 0) {
+            params.setMarginStart(dp(6.0f));
+        }
+        tabs.addView(tab, params);
     }
 
     /** Декодированные аватарки: раньше каждую заново распаковывали из base64 при каждой перерисовке списка. */
@@ -4983,7 +4967,7 @@ public final class MainActivity extends Activity {
             return;
         }
         boolean chatHeader = this.peer == null && isMainPage();
-        this.mainMenuButton.setVisibility(this.peer == null && !this.searchMode ? View.VISIBLE : View.GONE);
+        this.mainDock.setVisibility(this.peer == null && !this.searchMode ? View.VISIBLE : View.GONE);
         this.headerTitle.setVisibility(this.peer != null ? View.VISIBLE : View.GONE);
         this.notificationsButton.setVisibility(chatHeader ? View.VISIBLE : View.GONE);
         this.searchButton.setVisibility(chatHeader ? View.VISIBLE : View.GONE);
